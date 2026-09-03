@@ -86,8 +86,22 @@ async function loadRuntime(url) {
   rt.center = ctr; rt.radius = rad;
   rt.scene.camera.target = ctr;
   rt.scene.camera.fovY = 0.8;
-  rt.scene.camera.near = rad * 0.02;
-  rt.scene.camera.far = rad * 40;
+  // the camera orbits at ~2.6·r; keep far/near small (~40) so hyperbolic depth
+  // stays precise — a ratio of thousands z-fights the near/far walls of a solid
+  // mesh and you see straight through it (F-009).
+  rt.scene.camera.near = rad * 0.6;
+  rt.scene.camera.far = rad * 24;
+
+  // the vitrine models are photogrammetry scans with imperfect triangle winding
+  // — back-face culling punches holes in the near wall. Render every material
+  // double-sided so they read as solid (Babylon does the same for these).
+  for (let i = 0; i < Math.max(1, a.materials.length); i++) {
+    const m = a.materials[i];
+    rt.engine.renderer.registerMaterial(i, {
+      baseColorFactor: m ? m.baseColorFactor : [0.82, 0.82, 0.86, 1],
+      doubleSided: true,
+    });
+  }
 
   rt.stats = { loadMs, decodeMs: result.timing.decodeMs, path: a.stats.geometryPath,
     crossings: a.stats.wasmCrossings, verts: a.stats.vertices, tris: (a.stats.indices / 3) | 0,
