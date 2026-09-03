@@ -35,6 +35,13 @@ export interface DecodeOptions {
   geometry?: "auto" | "wasm" | "js";
   /** generate tangents (needs UV0 + normals). Off by default. */
   generateTangents?: boolean;
+  /** which decode pipeline.
+   *   `"js"` (default) — the JS front-end (this file): container + JSON + glTF
+   *      metadata in JS, geometry per the `geometry` option above.
+   *   `"native"` — PIPELINE B: the whole GLB→Asset decode in C++/WASM
+   *      (web/asset/native.ts). Falls back to `"js"` for primitives the batch
+   *      core can't do (sparse accessors, COLOR_0). */
+  parser?: "js" | "native";
   /** override the engine.wasm URL (tests) */
   wasmUrl?: string;
 }
@@ -47,6 +54,15 @@ export interface DecodeStats {
 }
 
 export async function decodeGLB(bytes: Uint8Array, opts: DecodeOptions = {}): Promise<Asset> {
+  if (opts.parser === "native") {
+    const { decodeGLBNative, NativePipelineUnsupported } = await import("./native.js");
+    try {
+      return await decodeGLBNative(bytes, { generateTangents: opts.generateTangents, wasmUrl: opts.wasmUrl });
+    } catch (e) {
+      if (!(e instanceof NativePipelineUnsupported)) throw e;
+      // fall through to the JS front-end for sparse / COLOR_0 primitives
+    }
+  }
   return decodeContainer(parseContainer(bytes), opts);
 }
 
