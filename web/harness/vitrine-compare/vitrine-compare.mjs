@@ -44,6 +44,9 @@ sizeCanvas(cL); sizeCanvas(cR);
 // ================= LEFT — Browser Runtime =================
 const rt = { engine: null, scene: null };
 async function loadRuntime(url) {
+  if (!navigator.gpu) throw new Error("WebGPU not available — use Chrome/Edge 113+ (or enable chrome://flags/#enable-unsafe-webgpu)");
+  if (!(await navigator.gpu.requestAdapter().catch(() => null)) && !(await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null)))
+    throw new Error("navigator.gpu exists but no adapter — close other WebGPU tabs / update your GPU driver, then reload");
   $("sL").textContent = "loading…";
   if (rt.engine) { rt.engine.dispose(); rt.engine = null; }
   // canvas sized once at module load; the runtime engine binds its depth buffer to it
@@ -54,31 +57,37 @@ async function loadRuntime(url) {
   const loadMs = performance.now() - t0;
   const a = result.asset;
 
-  // frame the combined world AABB
+  // frame the world-space AABB of the mesh-bearing nodes only (skip
+  // transform-only parents — AssetManager marks those invisible)
   rt.engine.core.markHierarchyDirty();
   rt.scene.evaluate(cL.width / cL.height);
   const wm = rt.engine.core.worldMatrices();
+  const C = rt.engine.core.components;
   let mn = [1e30, 1e30, 1e30], mx = [-1e30, -1e30, -1e30];
   for (let i = 0; i < rt.engine.core.count; i++) {
-    const b = rt.scene._meshBounds.get(rt.engine.core.components.meshId[i]);
+    if (!(C.flags[i] & 0b010)) continue;                 // F_VISIBLE — real render nodes
+    const b = rt.scene._meshBounds.get(C.meshId[i]);
     if (!b) continue;
     const m = wm.subarray(i * 16, i * 16 + 16);
     for (let c = 0; c < 8; c++) {
       const lx = (c & 1) ? b.max[0] : b.min[0], ly = (c & 2) ? b.max[1] : b.min[1], lz = (c & 4) ? b.max[2] : b.min[2];
       const w = 1 / (lx * m[3] + ly * m[7] + lz * m[11] + m[15]);
-      const x = (lx * m[0] + ly * m[4] + lz * m[8] + m[12]) * w;
-      const y = (lx * m[1] + ly * m[5] + lz * m[9] + m[13]) * w;
-      const z = (lx * m[2] + ly * m[6] + lz * m[10] + m[14]) * w;
-      mn = [Math.min(mn[0], x), Math.min(mn[1], y), Math.min(mn[2], z)];
-      mx = [Math.max(mx[0], x), Math.max(mx[1], y), Math.max(mx[2], z)];
+      mn = [Math.min(mn[0], (lx * m[0] + ly * m[4] + lz * m[8] + m[12]) * w),
+            Math.min(mn[1], (lx * m[1] + ly * m[5] + lz * m[9] + m[13]) * w),
+            Math.min(mn[2], (lx * m[2] + ly * m[6] + lz * m[10] + m[14]) * w)];
+      mx = [Math.max(mx[0], (lx * m[0] + ly * m[4] + lz * m[8] + m[12]) * w),
+            Math.max(mx[1], (lx * m[1] + ly * m[5] + lz * m[9] + m[13]) * w),
+            Math.max(mx[2], (lx * m[2] + ly * m[6] + lz * m[10] + m[14]) * w)];
     }
   }
+  if (mn[0] > mx[0]) { mn = [-1, -1, -1]; mx = [1, 1, 1]; }
   const ctr = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
   const rad = Math.max(1e-3, Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2);
   rt.center = ctr; rt.radius = rad;
   rt.scene.camera.target = ctr;
   rt.scene.camera.fovY = 0.8;
-  rt.scene.camera.fit(rad);
+  rt.scene.camera.near = rad * 0.02;
+  rt.scene.camera.far = rad * 40;
 
   rt.stats = { loadMs, decodeMs: result.timing.decodeMs, path: a.stats.geometryPath,
     crossings: a.stats.wasmCrossings, verts: a.stats.vertices, tris: (a.stats.indices / 3) | 0,
@@ -150,22 +159,25 @@ function tick(ts) {
   const spin = $("spin").checked;
   if (spin) camAngle += 0.005;
 
-  // both cameras: same orbit angle, radius = 2.4·model-radius, slight elevation
+  // both cameras: identical spherical pose around the model centre
+  //   radius = 2.6·r · polar (beta) 1.15 rad from +Y · same azimuth
+  const R = 2.6, BETA = 1.15;
+  const sb = Math.sin(BETA), cb = Math.cos(BETA);
   // --- runtime ---
   if (rt.engine && rt.scene && rt.center) {
-    const dist = rt.radius * 2.4;
+    const d = rt.radius * R;
     rt.scene.camera.position = [
-      rt.center[0] + Math.cos(camAngle) * dist,
-      rt.center[1] + rt.radius * 0.65,
-      rt.center[2] + Math.sin(camAngle) * dist,
+      rt.center[0] + d * sb * Math.cos(camAngle),
+      rt.center[1] + d * cb,
+      rt.center[2] + d * sb * Math.sin(camAngle),
     ];
     const st = rt.engine.renderOnce();
     accL += st.cpuFrameMs;
   }
-  // --- babylon ---
+  // --- babylon --- (ArcRotate: alpha around +Y, beta from +Y)
   if (bb.engine && bb.scene && bb.radius) {
     const cam = bb.scene.activeCamera;
-    if (cam) { cam.alpha = -camAngle - Math.PI / 2; cam.beta = 1.15; cam.radius = bb.radius * 2.4; }
+    if (cam) { cam.alpha = camAngle + Math.PI; cam.beta = BETA; cam.radius = bb.radius * R; }
     const t = performance.now();
     bb.scene.render();
     accR += performance.now() - t;

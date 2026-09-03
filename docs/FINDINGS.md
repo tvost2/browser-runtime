@@ -8,6 +8,121 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-013 · Incremental rendering — patch the cull + render list + GPU upload, not rebuild them
+`npm run build && npm run test:equivalence && npm run test:render:patch`
+`node --expose-gc bench/run-renderer-incremental.mjs 250000 · npm run bench:renderer:gpu`
+Cycle: [docs/investigations/incremental-renderer.md](investigations/incremental-renderer.md). Branch `feat/incremental-renderer`.
+Builds on F-012 (that cycle merged; v0.1.0 untouched).
+
+### PROFILE — after F-012, where the "something moved" frame goes
+
+`evaluate()` stage split (steady_clock in C++), `Standard`, 250k entities:
+
+| scenario | transform | **cull** | list build | total |
+|---|--:|--:|--:|--:|
+| static | 1.7 ms | 0 (fast path) | 0 | **1.7 ms** |
+| transform 0.1 % moving | 2.6 ms | **10.3 ms** | 0.1 ms | 13.0 ms |
+| camera pan | 1.7 ms | **10.2 ms** | 1.4 ms | 13.5 ms |
+| transform 10 % moving | 21.7 ms | 10.3 ms | 0.3 ms | 32.5 ms |
+
+The **O(n) frustum cull dominates** any frame where the camera or an object
+moved — it re-ran the 6-plane + 8-corner test for every entity. The
+render-list build (counting-sort + full `instanceWorld` copy) and the renderer's
+**full 4 MB instance-buffer upload every frame** were the next layer.
+
+### IMPLEMENT
+
+1. **Incremental linear cull** — when the camera is unchanged, only an entity
+   that *moved this frame* can have crossed a frustum plane. Re-test just the
+   `_recomputed` entities; reuse a persistent `_visibleBit` for the rest. The
+   O(n) scan that rebuilds `visibleId` in topo order stays (~7 ns/entity); the
+   ~30 ns/entity frustum math is skipped for what didn't move. Full re-test on
+   any camera move / structural change / strategy switch.
+2. **Incremental render list** — if the visible set + batch layout are identical
+   to last frame (same entities, same cull order, same sort mode, no meshId /
+   visibility edits), the counting-sort slot assignment is identical. Overwrite
+   only the `instanceWorld` rows of entities that moved (`_entitySlot[e]`) and
+   hand the renderer a **dirty-slot list**. `stats.listRebuilt` / `dirtySlots`.
+3. **Partial GPU upload** — `Renderer.render()` coalesces the dirty slots into
+   runs and issues partial `writeBuffer` calls; `lastUploadBytes` tracks it.
+   Skips the upload entirely when nothing moved.
+4. **`CullStrategy.Auto`** (new default) — per frame: `Bvh` while the camera
+   moves over a large scene (>20k, light churn), else the incremental linear
+   cull.
+
+Two latent renderer bugs fixed along the way (they only bite once uploads are
+conditional): the depth texture must resize with the canvas or `beginRenderPass`
+silently drops the frame; and the partial path must not run against a
+never-fully-uploaded instance buffer (a standalone `evaluate()` for a query /
+camera framing desyncs it).
+
+### VALIDATE
+
+- `test:equivalence` **6/6** — `test_incremental` extended: over 200
+  random-motion frames the patched render list (matrices **and** batches) is
+  byte-identical to a from-scratch rebuild (199/200 frames patched in place); a
+  moved-behind-camera entity leaves the set; camera-pan set + list == from
+  scratch; a visibility toggle invalidates the list.
+- `test:render:patch` **5/5** (browser) — nudging 50 visible entities patches
+  in place; the patched `instanceWorld` == a forced full rebuild; no GPU errors
+  on a partial-upload frame; a visibility toggle removes the entity from the draw.
+- `test:visual` PASS (engine-demo: camera + per-frame object motion, `Auto`,
+  120+ frames — frustum, on-screen, batching, depth, no GPU errors) ·
+  `test:glb` 89/89 · `test:glb:native` 114/114 · `test:glb:render` 6/6 · v0.1.0 4/4.
+
+### BENCHMARK — `evaluate()` ms, 250k entities, best-of-5 (`bench:renderer`)
+
+| scenario | F-012 `Standard` | this cycle `Standard` | this cycle `Bvh` | **`Auto`** (default) |
+|---|--:|--:|--:|--:|
+| static | 1.8 | 1.8 | 2.0 | **1.7** |
+| transform 0.1 % moving | 13.0 | 7.5 | 8.4 | **5.0** |
+| transform 1 % moving | 15.8 | 11.9 | 19.4 | **8.4** |
+| transform 10 % moving | 32.5 | 32.4 | 49.9 | 34.3 |
+| camera pan | 13.5 | 17.0 | 6.4 | **6.3** |
+| camera + 1 % moving | 17.6 | 21.1 | 20.4 | **18.9** |
+| visibility flip 0.1 % | (bug — ignored) | 1.7 | 3.2 | 2.9 |
+| high churn 100 % moving | 95 | 100 | 108 | **95** |
+
+- **`Auto` is the best or near-best in every scenario.** Object-manipulation with
+  a still camera (an editor, a simulation, a strategy game) — the common
+  interactive case — is **2.6× faster** (0.1 % moving: 13 → 5 ms); a moving
+  camera is **2.1× faster** (13.5 → 6.3 ms, `Auto` picks `Bvh`); static is
+  unchanged; the worst case (everything moves) has no regression.
+
+### BENCHMARK — GPU upload (`bench:renderer:gpu`, browser, WARP)
+
+Instance storage-buffer upload per frame, 60k entities (~33k visible):
+
+| scenario | before | this cycle |
+|---|--:|--:|
+| static | 4.1 MB | **0** |
+| transform 0.1 % moving | 4.1 MB | **2 KB** |
+| transform 1 % moving | 4.1 MB | **19 KB** (≈ 210×) |
+| camera move | 4.1 MB | 4.1 MB (full rebuild — expected) |
+
+`listRebuilt` is 0 % of frames for static + object motion, 100 % for camera
+moves. On the WARP bench host every fixture is GPU-bound (no discrete GPU), so
+the CPU-pipeline win shows in `bench:renderer` (Node), not in WARP FPS — the
+same F-008 caveat. The upload-bandwidth reduction is real and measurable.
+
+### DECIDE — ship
+
+Incremental cull + incremental render list + partial upload, with
+`CullStrategy.Auto` as the default. Object motion under a still camera — the
+dominant interactive workload — went from re-culling and re-uploading the whole
+scene every frame to touching only what moved: 2.6× less CPU, ~200× less upload
+bandwidth, no regression on static or worst-case. `Standard` / `Bvh` / `None`
+remain selectable; the situational-BVH decision from F-012 stands, now folded
+into `Auto`.
+
+**HYPOTHESIS (next):** the render-list build is still O(visible) and the cull's
+topo scan is still O(n). A dirty *list* (not a bitset scan) for the transform
+pass, and persistent per-node visibility in the BVH, are the next levers.
+Instancing / thin-instances is the next subsystem — the instance buffer +
+per-instance slot map this cycle built is its foundation.
+
+---
+
 ## F-012 · Incremental scene evaluation — a static 250k-entity frame costs 1.7 ms (was ~90 ms); + a spatial index for queries
 `npm run build && npm run test:equivalence && npm run test:spatial`
 `node --expose-gc bench/run-scene-incremental.mjs 250000`

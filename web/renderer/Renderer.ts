@@ -101,10 +101,12 @@ export class Renderer {
   drawCalls = 0;
 
   static async create(canvas: HTMLCanvasElement): Promise<Renderer> {
-    if (!navigator.gpu) throw new Error("WebGPU not available");
+    if (!navigator.gpu) throw new Error("WebGPU is not available in this browser (need Chrome/Edge 113+, or enable it)");
     const r = new Renderer();
-    r.adapter = (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }))!;
-    if (!r.adapter) throw new Error("no GPU adapter");
+    r.adapter = (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }))
+      ?? (await navigator.gpu.requestAdapter())                        // retry without a preference
+      ?? (await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }))!;  // last resort: software
+    if (!r.adapter) throw new Error("navigator.gpu.requestAdapter() returned null — no WebGPU adapter available");
     r.canTimestamp = r.adapter.features.has("timestamp-query");
     r.device = await r.adapter.requestDevice({ requiredFeatures: r.canTimestamp ? ["timestamp-query"] : [] });
     r.device.addEventListener("uncapturederror", (e: Event) => {
