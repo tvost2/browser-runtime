@@ -1,0 +1,72 @@
+{
+  "kind": "memory",
+  "computedBytesPerEntity": 248,
+  "soaBreakdown": {
+    "localPos": 12,
+    "localRot": 16,
+    "localScale": 12,
+    "parent": 4,
+    "localMin": 12,
+    "localMax": 12,
+    "meshId": 4,
+    "materialId": 4,
+    "flags": 4,
+    "world": 64,
+    "worldSphere": 16,
+    "_order": 4,
+    "_depth": 4,
+    "renderList(reserved)": 72,
+    "_sortKeys(reserved)": 8
+  },
+  "totalBytesPerEntityAt500k": 288.3584,
+  "jsHeapFlatMB": 4.676704406738281,
+  "apiHandleJsBytesPerEntity": 200,
+  "note": "Node, no renderer, fresh WasmCore per size. wasm0 = INITIAL_MEMORY. Growth = ALLOW_MEMORY_GROWTH (dlmalloc, may not return pages to the OS).",
+  "rows": [
+    {
+      "count": 10000,
+      "visible": 661,
+      "wasmHeapMB": 64,
+      "wasmGrowthMB": 0,
+      "wasmBytesPerEntity": 0,
+      "jsHeapMB": 4.676704406738281,
+      "initialMemoryMB": 64
+    },
+    {
+      "count": 50000,
+      "visible": 3273,
+      "wasmHeapMB": 64,
+      "wasmGrowthMB": 0,
+      "wasmBytesPerEntity": 0,
+      "jsHeapMB": 4.7008819580078125,
+      "initialMemoryMB": 64
+    },
+    {
+      "count": 100000,
+      "visible": 6644,
+      "wasmHeapMB": 64,
+      "wasmGrowthMB": 0,
+      "wasmBytesPerEntity": 0,
+      "jsHeapMB": 4.726753234863281,
+      "initialMemoryMB": 64
+    },
+    {
+      "count": 250000,
+      "visible": 16582,
+      "wasmHeapMB": 64,
+      "wasmGrowthMB": 0,
+      "wasmBytesPerEntity": 0,
+      "jsHeapMB": 4.734870910644531,
+      "initialMemoryMB": 64
+    },
+    {
+      "count": 500000,
+      "visible": 33111,
+      "wasmHeapMB": 137.5,
+      "wasmGrowthMB": 73.5,
+      "wasmBytesPerEntity": 154.140672,
+      "jsHeapMB": 3.9400177001953125,
+      "initialMemoryMB": 64
+    }
+  ]
+}

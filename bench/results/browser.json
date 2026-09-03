@@ -1,0 +1,296 @@
+{
+  "kind": "browser",
+  "scale": "0.5",
+  "results": [
+    {
+      "backend": "js",
+      "scene": "medium",
+      "scale": 0.5,
+      "meshCount": 400,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 0.2149999998509884,
+      "uploadMs": 0.15000000223517418,
+      "evalMs": {
+        "mean": 1.3402199999541045,
+        "median": 1.0600000023841858,
+        "p95": 3.524999998509884
+      },
+      "frameMs": {
+        "mean": 2.20155999982357,
+        "median": 1.6400000005960464,
+        "p95": 4.079999998211861
+      },
+      "fps": 609.756097339364,
+      "gpuMs": {
+        "median": 3.8227,
+        "p95": 5.6282
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "cpp",
+      "scene": "medium",
+      "scale": 0.5,
+      "meshCount": 400,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 101.17999999970198,
+      "uploadMs": 3.155000001192093,
+      "evalMs": {
+        "mean": 0.3229400000423193,
+        "median": 0.24499999731779099,
+        "p95": 0.48000000044703484
+      },
+      "frameMs": {
+        "mean": 0.7884199998676776,
+        "median": 0.6299999989569187,
+        "p95": 1.8350000008940697
+      },
+      "fps": 1587.3015899296581,
+      "gpuMs": {
+        "median": 4.3646,
+        "p95": 5.7548
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "js",
+      "scene": "manyObjects",
+      "scale": 0.5,
+      "meshCount": 10000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 0.17999999970197678,
+      "uploadMs": 0.25,
+      "evalMs": {
+        "mean": 26.525040000066163,
+        "median": 26.00499999895692,
+        "p95": 34.33500000089407
+      },
+      "frameMs": {
+        "mean": 27.04940000000596,
+        "median": 26.53999999910593,
+        "p95": 34.899999998509884
+      },
+      "fps": 37.67897513314573,
+      "gpuMs": {
+        "median": 16.3736,
+        "p95": 19.5096
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "cpp",
+      "scene": "manyObjects",
+      "scale": 0.5,
+      "meshCount": 10000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 60.394999999552965,
+      "uploadMs": 9.91499999910593,
+      "evalMs": {
+        "mean": 7.289459999918938,
+        "median": 5.635000001639128,
+        "p95": 16.345000002533197
+      },
+      "frameMs": {
+        "mean": 8.091680000022054,
+        "median": 6.4849999994039536,
+        "p95": 17.970000002533197
+      },
+      "fps": 154.2020046402331,
+      "gpuMs": {
+        "median": 17.197,
+        "p95": 21.6022
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "js",
+      "scene": "manyVisible",
+      "scale": 0.5,
+      "meshCount": 7500,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 0.1550000011920929,
+      "uploadMs": 0.11499999836087227,
+      "evalMs": {
+        "mean": 25.719559999868274,
+        "median": 25.300000000745058,
+        "p95": 34.689999997615814
+      },
+      "frameMs": {
+        "mean": 26.427640000134705,
+        "median": 25.949999999254942,
+        "p95": 35.774999998509884
+      },
+      "fps": 38.53564547316807,
+      "gpuMs": {
+        "median": 21.7765,
+        "p95": 25.9698
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "cpp",
+      "scene": "manyVisible",
+      "scale": 0.5,
+      "meshCount": 7500,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 107.57000000029802,
+      "uploadMs": 20.45499999821186,
+      "evalMs": {
+        "mean": 5.449159999921918,
+        "median": 3.675000000745058,
+        "p95": 13.884999997913837
+      },
+      "frameMs": {
+        "mean": 6.221840000063181,
+        "median": 4.804999999701977,
+        "p95": 15.089999999850988
+      },
+      "fps": 208.11654527825672,
+      "gpuMs": {
+        "median": 21.9853,
+        "p95": 26.6903
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "js",
+      "scene": "heavyCulling",
+      "scale": 0.5,
+      "meshCount": 10000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 0.14000000059604645,
+      "uploadMs": 0.125,
+      "evalMs": {
+        "mean": 15.65510000012815,
+        "median": 15.824999999254942,
+        "p95": 20.300000000745058
+      },
+      "frameMs": {
+        "mean": 16.040780000060796,
+        "median": 16.20500000193715,
+        "p95": 20.75499999895692
+      },
+      "fps": 61.70934895899165,
+      "gpuMs": {
+        "median": 4.0991,
+        "p95": 5.8313
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "cpp",
+      "scene": "heavyCulling",
+      "scale": 0.5,
+      "meshCount": 10000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 76.6849999986589,
+      "uploadMs": 12.344999998807907,
+      "evalMs": {
+        "mean": 4.570620000079274,
+        "median": 4.599999997764826,
+        "p95": 5.614999998360872
+      },
+      "frameMs": {
+        "mean": 4.860660000115633,
+        "median": 4.870000001043081,
+        "p95": 5.9400000013411045
+      },
+      "fps": 205.33880899092708,
+      "gpuMs": {
+        "median": 3.4218,
+        "p95": 5.5638
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "js",
+      "scene": "cpuBound",
+      "scale": 0.5,
+      "meshCount": 6000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 0.23499999940395355,
+      "uploadMs": 0.23499999940395355,
+      "evalMs": {
+        "mean": 18.593319999977947,
+        "median": 18.25499999895692,
+        "p95": 24.569999996572733
+      },
+      "frameMs": {
+        "mean": 19.80747999994457,
+        "median": 19.275000002235174,
+        "p95": 25.854999996721745
+      },
+      "fps": 51.880674442751626,
+      "gpuMs": {
+        "median": 9.8522,
+        "p95": 14.0205
+      },
+      "jsHeapGrowthBytes": 0
+    },
+    {
+      "backend": "cpp",
+      "scene": "cpuBound",
+      "scale": 0.5,
+      "meshCount": 6000,
+      "frames": 250,
+      "gpu": {
+        "adapter": "?",
+        "timestamps": true
+      },
+      "initMs": 71.00999999791384,
+      "uploadMs": 9.379999998956919,
+      "evalMs": {
+        "mean": 2.9066000000536443,
+        "median": 2.4599999971687794,
+        "p95": 4.385000001639128
+      },
+      "frameMs": {
+        "mean": 4.016620000064373,
+        "median": 3.6149999983608723,
+        "p95": 6.475000001490116
+      },
+      "fps": 276.62517301616157,
+      "gpuMs": {
+        "median": 7.71,
+        "p95": 10.9332
+      },
+      "jsHeapGrowthBytes": 0
+    }
+  ]
+}

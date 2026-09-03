@@ -1,0 +1,54 @@
+{
+  "kind": "native-ceiling",
+  "results": [
+    {
+      "nodes": 800,
+      "visible": 80,
+      "batches": 8,
+      "medianMs": 0.3055,
+      "p95Ms": 0.3682
+    },
+    {
+      "nodes": 2500,
+      "visible": 245,
+      "batches": 8,
+      "medianMs": 1.0044,
+      "p95Ms": 1.1558
+    },
+    {
+      "nodes": 4000,
+      "visible": 392,
+      "batches": 8,
+      "medianMs": 1.2587,
+      "p95Ms": 1.7949
+    },
+    {
+      "nodes": 5000,
+      "visible": 501,
+      "batches": 8,
+      "medianMs": 1.5351,
+      "p95Ms": 2.226
+    },
+    {
+      "nodes": 6000,
+      "visible": 581,
+      "batches": 8,
+      "medianMs": 1.8351,
+      "p95Ms": 2.6276
+    },
+    {
+      "nodes": 7000,
+      "visible": 676,
+      "batches": 8,
+      "medianMs": 2.2754,
+      "p95Ms": 3.183
+    },
+    {
+      "nodes": 20000,
+      "visible": 1994,
+      "batches": 8,
+      "medianMs": 6.7686,
+      "p95Ms": 9.4044
+    }
+  ]
+}
