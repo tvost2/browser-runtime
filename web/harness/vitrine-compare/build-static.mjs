@@ -68,8 +68,9 @@ for (const p of PICK) {
 }
 await writeFile(join(out, "models.json"), JSON.stringify(manifest, null, 2));
 
-// 5. a Caddyfile snippet for the operator
-await writeFile(join(out, "Caddyfile.snippet"), `# add to the VM Caddyfile, then: caddy reload
+// 5. a Caddyfile snippet for the operator — written NEXT TO dist/, never inside
+// it, so the token is not served publicly if dist/ is uploaded as-is.
+await writeFile(join(here, "Caddyfile.snippet"), `# add to the VM Caddyfile, then: caddy reload
 3dviewer.mytheria.com.br {
 	root * /opt/sitefactory/deploy/3dviewer
 	file_server

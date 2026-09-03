@@ -50,3 +50,4 @@ tools/migration-analyzer/report.json
 
 # side-by-side viewer static build (96MB, deploy artifact)
 web/harness/vitrine-compare/dist/
+web/harness/vitrine-compare/Caddyfile.snippet

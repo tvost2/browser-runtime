@@ -2,6 +2,14 @@
 
 Fully static. No node process on the VM.
 
+**Live since 2026-09-03** at https://3dviewer.mytheria.com.br
+- Cloudflare DNS: `3dviewer` CNAME → `home.oportunidadeslocais.com.br` (proxy off), matches `smartworld`.
+- Files: `mytheria@192.168.100.127:/opt/sitefactory/deploy/3dviewer/`.
+- Caddy: block appended to `/etc/caddy/Caddyfile` (backup `Caddyfile.bak-before-3dviewer-20260903`).
+- Cert: Let's Encrypt via Cloudflare DNS-01.
+
+Re-deploy = re-run the build + re-upload (steps 1-2). DNS/Caddy already done.
+
 ## 1. Build the bundle (on this machine)
 
 ```
