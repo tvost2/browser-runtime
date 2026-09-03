@@ -1,5 +1,5 @@
 --- .bak-browser-runtime/digitalTwinDemoMain.js	2026-09-03 16:33:17.680654606 +0000
-+++ src/digitalTwin/digitalTwinDemoMain.js	2026-09-03 16:52:02.205010935 +0000
++++ src/digitalTwin/digitalTwinDemoMain.js	2026-09-03 17:08:46.294323987 +0000
 @@ -16,6 +16,7 @@
  
  import { DigitalTwinScene } from './DigitalTwinScene.js';
@@ -8,7 +8,7 @@
  import { GeometryKind } from './GeometryPrimitives.js';
  import { extrudePolygonToMesh, polylineToRibbonMesh, triangulatePolygon } from './geometryUtils.js';
  import { applySparseGeometryToMesh } from '../primezeta/renderers/BabylonSparseFieldAdapter.js';
-@@ -2609,8 +2610,92 @@
+@@ -2609,8 +2610,110 @@
  // has loaded).
  let lastSmartCityWindowCheckAt = 0;
  const SMART_CITY_WINDOW_CHECK_INTERVAL_MS = 300;
@@ -48,12 +48,30 @@
 +  RT_MODE = runtime;
 +  _runtimeCanvasEl.style.display = runtime ? 'block' : 'none';
 +  _runtimeHudEl.style.display = runtime ? 'block' : 'none';
++  const _noteEl = el('runtimeNote');
 +  if (runtime) {
 +    _lastMirrorAt = 0;
 +    const info = RTR.runtimeInfo();
-+    if (_engineStatusEl) _engineStatusEl.textContent = `Browser Runtime ativo — ${info?.software ? 'WebGPU por software (lento)' : 'GPU: ' + info?.adapter}`;
++    if (info?.software) {
++      if (_engineStatusEl) _engineStatusEl.textContent = '⚠ WebGPU por software — a tela do runtime pode ficar preta neste PC';
++      if (_noteEl) {
++        _noteEl.innerHTML = `<b>⚠ Sem GPU real neste dispositivo</b><br>` +
++          `O WebGPU caiu no renderizador por software, que roda mas <b>não pinta na tela</b> — ` +
++          `o painel do runtime fica preto mesmo com os números atualizando (é limitação do ` +
++          `Chrome/Edge sem GPU, não do motor).<br><br>` +
++          `Abra em um <b>celular recente</b> (Chrome 121+ / Safari 18+) pra ver renderizando. ` +
++          `O Babylon continua funcionando aqui — é só desmarcar.` +
++          `<br><button id="runtimeNoteClose">entendi</button>`;
++        _noteEl.style.display = 'block';
++        el('runtimeNoteClose')?.addEventListener('click', () => { _noteEl.style.display = 'none'; });
++      }
++    } else {
++      if (_engineStatusEl) _engineStatusEl.textContent = `Browser Runtime ativo — GPU: ${info?.adapter || 'ok'}`;
++      if (_noteEl) _noteEl.style.display = 'none';
++    }
 +  } else {
 +    RTR.runtimeHideAll();
++    if (_noteEl) _noteEl.style.display = 'none';
 +    if (_engineStatusEl) _engineStatusEl.textContent = 'Babylon.js (WebGL) — padrão';
 +  }
 +}

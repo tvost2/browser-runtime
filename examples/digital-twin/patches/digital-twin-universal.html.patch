@@ -1,12 +1,19 @@
 --- .bak-browser-runtime/digital-twin-universal.html	2026-09-03 16:33:17.676635772 +0000
-+++ digital-twin-universal.html	2026-09-03 16:33:39.197966027 +0000
-@@ -39,6 +39,18 @@
++++ digital-twin-universal.html	2026-09-03 17:08:47.022275598 +0000
+@@ -39,6 +39,25 @@
      }
      html, body { margin: 0; height: 100%; background: var(--bg); font-family: system-ui, sans-serif; color: var(--text); overflow: hidden; }
      #renderCanvas { width: 100%; height: 100%; display: block; touch-action: none; }
 +    /* Browser Runtime (C++/WASM + WebGPU) overlay — opaque, stacked over
 +       the Babylon canvas, shown only while the engine toggle is on. */
 +    #runtimeCanvas { position: fixed; inset: 0; width: 100%; height: 100%; display: none; z-index: 2; background: #05060a; touch-action: none; pointer-events: none; }
++    #runtimeNote {
++      position: fixed; left: 50%; top: 46%; transform: translate(-50%,-50%); z-index: 7; display: none;
++      max-width: 340px; text-align: center; background: rgba(20,26,40,0.96); border: 1px solid #3a4a66;
++      border-radius: 10px; padding: 16px 18px; font-size: 12.5px; line-height: 1.6; color: #dbe4f0;
++    }
++    #runtimeNote b { color: #ffd479; }
++    #runtimeNote button { margin-top: 10px; padding: 5px 12px; background: #1c3550; color: #8fd0ff; border: 1px solid #2a3a52; border-radius: 5px; cursor: pointer; }
 +    #runtimeHud {
 +      position: fixed; left: 12px; bottom: 12px; z-index: 6; display: none;
 +      background: rgba(5,7,12,0.82); border: 1px solid #2a3a52; border-radius: 8px;
@@ -19,16 +26,17 @@
      .panel { position: fixed; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.5; z-index: 5; }
      #topPanel { top: 12px; left: 12px; width: 320px; }
      #topPanel h1 { font-size: 14px; margin: 0 0 8px; color: var(--accent); display: inline-block; }
-@@ -124,6 +136,8 @@
+@@ -124,6 +143,9 @@
  </head>
  <body>
    <canvas id="renderCanvas"></canvas>
 +  <canvas id="runtimeCanvas"></canvas>
++  <div id="runtimeNote"></div>
 +  <div id="runtimeHud"></div>
    <div id="streetLabels"></div>
    <div class="hint">Precisa ser servido via <code>node serve.mjs .</code> (não abra como file://).</div>
  
-@@ -153,6 +167,10 @@
+@@ -153,6 +175,10 @@
          Aplicar Sparse Geometry Engine (10%, opcional — padrão é RAW/100%, representação correta)
        </label>
      </div>
