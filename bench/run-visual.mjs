@@ -5,15 +5,18 @@
 // pipeline behave".
 //
 //   npm run build && npx playwright install chromium
-//   node bench/run-visual.mjs
+//   npm run test:visual
 //
-// Checks, at 10k AND 20k entities:
-//   1. render target  — >2% of sampled pixels differ from the clear colour
-//                       (i.e. NOT a black screen)
-//   2. frustum        — 0 < visible < entityCount   (culling actually culls)
-//   3. batching       — drawCalls == distinct mesh count (2: box + sphere)
-//   4. depth/near-far — a known-visible entity projects inside the NDC cube
-//   5. no WebGPU validation errors during a frame
+// Structural checks (PASS/FAIL), at 10k AND 20k entities:
+//   - frustum         0 < visible < entityCount            (culling culls)
+//   - on-screen       >50% of visible entities land in NDC (camera/transform sane)
+//   - batching        drawCalls == distinct mesh count     (box + sphere → 2)
+//   - NDC cube        sampled entities project in [-1,1]³
+//   - depth headroom  median NDC z < 0.999   ← the direct F-009 guard
+//   - no WebGPU validation errors, no page errors
+// Plus a best-effort "not a black screen" screenshot-size check reported as a
+// WARNING (in-page pixel readback is unreliable on software WebGPU).
+// bench/results/visual-{10000,20000}.png are saved for human review.
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -74,7 +77,7 @@ for (const count of [10000, 20000]) {
 
     return {
       gpuError: gpuError ? gpuError.message : null,
-      visible: e.stats.visible, entities: e.stats.entities, drawCalls: e.stats.drawCalls,
+      visible: fr.visibleCount, entities: e.stats.entities, drawCalls: e.stats.drawCalls,
       distinctMeshes: new Set(fr.batches.map((b) => b.meshId)).size,
       ndcAllInCube: inCube, ndcZMedian: ndcZ[ndcZ.length >> 1],
       wasmHeapMB: e.stats.wasmHeapMB, evalMs: e.stats.evalMs,
