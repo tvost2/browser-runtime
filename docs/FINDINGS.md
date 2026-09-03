@@ -8,6 +8,38 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-015 · `.hbc` (Cube3 Vault) decodes in the pipeline
+Branch `feat/hbc-decode` (off `develop`). `scene.loadAsset("model.glb.hbc")`.
+
+`decodeGLB()` sniffs the `HBC1` magic and decompresses a Cube3 Vault `.hbc`
+(lossless GLB compression — varint index + per-block DEFLATE/GZIP/**Brotli**/
+PackBits + split/delta byte de-interleave + GLB segment reassembly, SHA-256
+verified) back to a GLB *in place*. The bytes go straight to the native C++
+pipeline — never re-parsed by a JS loader. The decoder + Google's reference JS
+Brotli decode are a lazily-loaded sibling chunk (`web/dist/hbc.js`, ~200 KB)
+that `decodeGLB` imports only when it sees an `.hbc`; `engine.js` stays ~82 KB.
+
+Measured (`3.glb.hbc`, Node, and rendered end-to-end in a WebGPU browser):
+
+| | |
+|---|--:|
+| on the wire | 19.9 MB (was 34.2 MB — **41 % smaller**, lossless) |
+| Brotli decompress (JS) | **~1.7 s** |
+| native GLB decode | ~0.5 s |
+| render | 995k verts / 2.0M tris, 1 draw |
+
+The 1.7 s JS Brotli is the cost to beat. It only wins on links slower than
+~100 Mbps (below that, the 14 MB saved > 1.7 s). **Next: port to C++/WASM** —
+vendor `libbrotlidec` (google/brotli decode-only, ~C, MIT, ports clean under
+emcc; ~5–10× the JS decoder) + port the 404-line reconstruct path (varint /
+CRC32 / packbits / split+delta / GLB reassembly — all trivial, JSON header via
+the already-vendored yyjson). Expected ~1.7 s → ~250–400 ms and the JS chunk
+disappears; the `.wasm` gains ~80 KB. `bcpp::gltf::Pipeline` grows a
+`hbcToGlb()` entry that decompresses into the WASM heap then runs `loadGLB`.
+~2–3 days.
+
+---
+
 ## F-013 · Incremental rendering — patch the cull + render list + GPU upload, not rebuild them
 `npm run build && npm run test:equivalence && npm run test:render:patch`
 `node --expose-gc bench/run-renderer-incremental.mjs 250000 · npm run bench:renderer:gpu`
