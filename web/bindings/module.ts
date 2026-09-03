@@ -4,8 +4,10 @@
 
 export interface EngineModule {
   HEAPF32: Float32Array; HEAPU32: Uint32Array; HEAP32: Int32Array; HEAPU8: Uint8Array;
+  HEAPF64?: Float64Array;
   World: new () => any;
   GltfBatch: new () => any;
+  GltfPipeline: new () => any;
 }
 
 let cached: Promise<EngineModule> | null = null;

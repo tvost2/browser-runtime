@@ -47,7 +47,12 @@ const env = { ...process.env, EM_CONFIG: emConfig };
 
 const args = [
   "-std=c++20", ...opt,
+  "-Wno-unused-command-line-argument",
   "-I", join(nativeDir, "include"),
+  "-I", join(nativeDir, "vendor"),
+  // vendored JSON parser for PIPELINE B (read-only; MIT — native/vendor/LICENSE-yyjson)
+  "-DYYJSON_DISABLE_WRITER=1", "-DYYJSON_DISABLE_UTF8_VALIDATION=0",
+  join(nativeDir, "vendor", "yyjson.c"),
   join(nativeDir, "bindings", "engine.cpp"),
   join(nativeDir, "bindings", "asset.cpp"),
   "--bind",

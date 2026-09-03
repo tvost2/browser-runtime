@@ -77,9 +77,11 @@ export interface Asset {
     nodes: number; meshes: number; primitives: number;
     vertices: number; indices: number; textures: number;
     zeroCopyAccessors: number; copiedAccessors: number;
-    /** which geometry decoder ran */
-    geometryPath: "wasm" | "js" | "mixed";
-    /** JS→WASM calls made for geometry (0 for the js path) */
+    /** which decoder ran. `"native"` = the whole GLB→Asset pipeline in C++/WASM
+     *  (web/asset/native.ts); the others are the JS front-end (web/asset/gltf.ts)
+     *  with geometry in JS / the batch core / both. */
+    geometryPath: "wasm" | "js" | "mixed" | "native";
+    /** JS→WASM calls made (0 for the pure js path) */
     wasmCrossings: number;
     /** binary bytes copied into WASM linear memory */
     bytesUploadedToWasm: number;

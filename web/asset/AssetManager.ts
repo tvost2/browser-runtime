@@ -9,7 +9,7 @@ import type { Entity } from "../api/Entity.js";
 
 export interface LoadResult {
   asset: Asset;
-  timing: { fetchMs: number; decodeMs: number };
+  timing: { fetchMs: number; decodeMs: number; instantiateMs?: number; imageDecodeMs?: number; materialUploadMs?: number };
 }
 
 export class AssetManager {
@@ -31,14 +31,18 @@ export class AssetManager {
 
   /** Turn an `Asset` into live entities in `scene`. Returns the created entities
    *  (roots first). Geometry + textures reach the GPU here — never before. */
-  async instantiate(asset: Asset, scene: Scene): Promise<Entity[]> {
+  async instantiate(asset: Asset, scene: Scene, timing?: LoadResult["timing"]): Promise<Entity[]> {
     const renderer = scene._renderer;
+    const ti0 = now();
 
     // --- materials + textures (browser only; Node tests skip this) ---
     if (renderer) {
       // decode each image to raw RGBA8 (via OffscreenCanvas — reliable on software
       // WebGPU, unlike copyExternalImageToTexture)
+      const td0 = now();
       const rgba = await Promise.all(asset.images.map((im) => decodeImage(im.bytes, im.mimeType)));
+      const tm0 = now();
+      if (timing) timing.imageDecodeMs = tm0 - td0;
       asset.materials.forEach((m, i) => {
         const tex = m.baseColorTexture >= 0 ? asset.textures[m.baseColorTexture] : null;
         renderer.registerMaterial(i, {
@@ -48,6 +52,7 @@ export class AssetManager {
           doubleSided: m.doubleSided,
         });
       });
+      if (timing) timing.materialUploadMs = now() - tm0;
     }
 
     // register each primitive's geometry once; a mesh shared by N nodes is reused.
@@ -87,13 +92,14 @@ export class AssetManager {
         }
       }
     }
+    if (timing) timing.instantiateMs = now() - ti0;
     return asset.roots.map((r) => entities[r]).concat(entities);
   }
 
   /** convenience: load + instantiate in one call */
   async loadInto(url: string, scene: Scene, opts: DecodeOptions = {}): Promise<{ entities: Entity[]; result: LoadResult }> {
     const result = await this.load(url, opts);
-    return { entities: await this.instantiate(result.asset, scene), result };
+    return { entities: await this.instantiate(result.asset, scene, result.timing), result };
   }
 }
 
