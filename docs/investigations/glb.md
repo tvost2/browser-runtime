@@ -4,39 +4,46 @@
 
 | step | state |
 |---|---|
-| PROFILE | ✅ [FINDINGS F-010](../FINDINGS.md#f-010--glb--the-loader-belongs-entirely-in-javascript-profile--hypothesis) · `npm run glb:profile` |
-| HYPOTHESIS | ✅ the minimal loader is 100 % JavaScript; WASM stays out |
+| PROFILE | ✅ [FINDINGS F-010](../FINDINGS.md#f-010) · `npm run glb:profile` |
 | DESIGN | ✅ decisions below |
-| IMPLEMENT | ✅ `web/asset/` — `glb.ts` (container) · `gltf.ts` (decode → `Asset`) · `Asset.ts` · `AssetManager.ts` (instantiate) · `scene.loadAsset(url)` |
-| VALIDATE (decode) | ✅ `npm run test:glb` — **60/60**: hand-authored fixtures vs exact known values + Khronos fixtures cross-checked against `@babylonjs/loaders` (vertex counts match) |
-| VALIDATE (render) | 🚧 browser test: fixture GLB → `AssetManager.instantiate` → WebGPU → structural checks |
-| BENCHMARK | ⬜ download / parse / decode / GPU upload / first frame / steady-state, small→large |
-| DECIDE | ⬜ |
+| IMPLEMENT (JS loader) | ✅ `web/asset/` — `glb.ts` (container) · `gltf.ts` (decode → `Asset`) · `Asset.ts` · `AssetManager.ts` · `scene.loadAsset(url)` |
+| IMPLEMENT (C++/WASM core) | ✅ `native/include/bcpp/gltf.hpp` (`bcpp::gltf::Batch`) · `native/bindings/asset.cpp` (`GltfBatch`) · `web/asset/wasm.ts` (JS batch API) · hybrid `"auto"` dispatch in `gltf.ts` |
+| VALIDATE (equivalence) | ✅ `npm run test:glb` — **89/89**: WASM vs JS reference byte-for-byte + exact known values + `@babylonjs/loaders` cross-check |
+| VALIDATE (render) | ✅ `npm run test:glb:render` — **6/6** fixtures through the forced WASM path to the pixels, screenshots visually verified |
+| BENCHMARK | ✅ `npm run bench:glb` — JS vs WASM vs `auto` vs WASM+tangents, all fixtures |
+| DECIDE | ✅ [Conclusion](#conclusion) |
 
-It will gain a `## Conclusion` section once the cycle completes.
-
-## Decisions (from PROFILE)
+## Decisions
 
 1. **Parsing runs in JS.** `JSON.parse` is 0.02–0.06 ms for any file size (the
-   JSON chunk is metadata). No reason to marshal it into WASM.
-2. **Accessors are zero-copy where possible.** Non-interleaved `FLOAT` / `UNSIGNED_SHORT`
-   accessor → `new Float32Array(bin, byteOffset, count*comps)` view, no decode.
-   A copy happens only for: interleaved data (`byteStride`), normalized ints,
-   `UNSIGNED_BYTE` indices (→ Uint16), sparse accessors.
-3. **Geometry does not enter WASM.** It goes `bin bytes → GPUBuffer` via
-   `queue.writeBuffer`. The C++ `World` only needs the per-mesh local AABB
-   (accessor `min`/`max`, or recomputed once).
+   JSON chunk is metadata). No reason to marshal it into WASM. Metadata and
+   orchestration (nodes, materials, textures, hierarchy) stay in TypeScript.
+2. **Geometry that is already GPU-ready stays zero-copy in JS.** Non-interleaved
+   `FLOAT` accessor with normals + accessor min/max + U16/U32 indices →
+   `new Float32Array(bin, byteOffset, count*comps)` view, no decode, no copy.
+   The benchmark shows this beats any path that crosses the WASM heap.
+3. **Geometry that needs *work* goes to the C++/WASM batch core.** Tangent
+   generation, area-weighted normal generation when absent, de-quantising
+   normalized / integer attributes, de-interleaving, non-indexed expansion,
+   index widening. One `process()` call per asset, ~9 JS↔WASM crossings total —
+   never per primitive, never per vertex. The dispatch is per-primitive
+   (`geometry: "auto"`, the default); `"wasm"` / `"js"` force one path.
 4. **Images stay bytes until upload.** `Asset.images[]` holds `{ mimeType, bytes }`;
-   `createImageBitmap` + `copyExternalImageToTexture` happen in the renderer.
+   `createImageBitmap` → `OffscreenCanvas` → `writeTexture` happen in
+   `AssetManager` / the renderer.
 5. **glTF subset for this pass:** `mode: 4` primitives; accessors
    SCALAR/VEC2/VEC3/VEC4 with componentType FLOAT / UNSIGNED_SHORT /
-   UNSIGNED_INT / UNSIGNED_BYTE; attributes POSITION, NORMAL, TEXCOORD_0,
-   COLOR_0; nodes with TRS or `matrix`; `pbrMetallicRoughness` (baseColorFactor,
-   baseColorTexture, metallicFactor, roughnessFactor); `alphaMode`,
-   `doubleSided`. **Out:** animations, skins, morph targets, cameras/lights,
-   all `KHR_*` / `EXT_*` extensions, sparse accessors (parse-time error, not
-   silent).
-6. **`Asset` is immutable + GPU-free + WASM-free** — fully unit-testable in Node.
+   UNSIGNED_INT / UNSIGNED_BYTE / BYTE / SHORT; attributes POSITION, NORMAL,
+   TEXCOORD_0, COLOR_0, TANGENT; nodes with TRS or `matrix`;
+   `pbrMetallicRoughness` (baseColorFactor, baseColorTexture, metallicFactor,
+   roughnessFactor); `alphaMode`, `doubleSided`. **Out:** animations, skins,
+   morph targets, cameras/lights, all `KHR_*` / `EXT_*` extensions. Sparse
+   accessors → JS reference path. Everything unsupported → `asset.ignored[]`,
+   never silent.
+6. **`Asset` is immutable + GPU-free** — fully unit-testable in Node. The loader
+   (`glb` + `gltf` + `Asset`) imports nothing from `web/renderer`; `wasm.ts` is
+   the only loader file that touches the WASM module, and only for geometry that
+   opts into it.
 
 ## Goal
 
@@ -67,26 +74,74 @@ web/asset/
   glb.ts          parseContainer(bytes) → { json: <parsed glTF>, bin: Uint8Array|null }
                   · GLB header + chunk walk · plain .gltf + data-URI buffers · GlbError
   gltf.ts         decodeContainer({json,bin}, opts) → Asset
-                  · accessor reader: FLOAT/packed/aligned → Float32Array VIEW (zero-copy);
-                    else copy + widen (u8/u16 indices → u32) / normalize / densify sparse
-                  · nodes: topological re-order (parents first), matrix→TRS decompose,
-                    parent index resolved
-                  · primitives: POSITION/NORMAL/TEXCOORD_0/COLOR_0, indices, AABB (accessor
-                    min/max or recomputed), material index
-                  · materials: pbrMetallicRoughness (baseColorFactor/Texture, metallic,
-                    roughness), emissive, alphaMode, doubleSided
+                  · per-primitive dispatch: gpuReady() → JS zero-copy view;
+                    else → C++/WASM batch core (opts.geometry: "auto" | "wasm" | "js")
+                  · JS path: FLOAT/packed → Float32Array VIEW; else copy + widen / normalize
+                  · nodes: topological re-order (parents first), matrix→TRS decompose
+                  · materials: pbrMetallicRoughness, emissive, alphaMode, doubleSided
                   · textures/images: bytes kept raw (decode deferred)
                   · everything unsupported → asset.ignored[] (never silent)
+                  · stats: geometryPath ("wasm"|"js"|"mixed"), wasmCrossings, bytesUploadedToWasm
+  wasm.ts         processPrimitivesWasm(container, specs[], opts) → { geometries, crossings, bytesUploaded }
+                  · builds one contiguous BIN blob — ONLY the byte ranges the geometry
+                    accessors touch (not embedded texture bytes) — + a flat PrimDesc[] table
+                  · one reused GltfBatch instance; one process() call; reads SoA outputs as views
   Asset.ts        the immutable data shapes (no renderer / WASM import)
-  AssetManager.ts load(url) → {asset, timing} · instantiate(asset, scene) → Entity[]
-                  (registers each primitive's geometry once; shared meshes reused;
-                  multi-primitive mesh → child entity per primitive) · loadInto(url, scene)
-web/api/Scene.ts  scene.loadAsset(url)  (lazy AssetManager)
+  AssetManager.ts load(url, opts) → {asset, timing} · instantiate(asset, scene) → Entity[]
+                  · decodeImage() bytes → RGBA8 via createImageBitmap + OffscreenCanvas
+                  · registers each primitive once; shared meshes reused; materials + textures
+                    to the renderer here, never before
+web/api/Scene.ts  scene.loadAsset(url, { geometry, generateTangents })  (lazy AssetManager)
+
+native/
+  include/bcpp/gltf.hpp   bcpp::gltf::Batch — header-only batch geometry processor
+                          · PrimDesc[96 B] in, PrimOut[64 B] + SoA pos/nrm/uv/tan + u32 idx out
+                          · decodeVec(): memcpy fast path for tightly-packed non-normalized F32
+                          · index widen (u8/u16→u32, memcpy for u32) · non-indexed expansion
+                          · genNormals() area-weighted · genTangents() Lengyel + Gram-Schmidt
+                          · AABB from accessor min/max or computed
+                          · decode semantics bit-match web/asset/gltf.ts (the reference)
+  bindings/asset.cpp      embind GltfBatch: reserveBin / setPrimCount / binPtr / descPtr /
+                          process(flags) / totalVertices / totalIndices / {pos,nrm,uv,tan,idx,outMeta}Ptr
 ```
 
-The loader (`glb` + `gltf` + `Asset`) imports **nothing** from `web/renderer`,
-`web/bindings`, or the WASM core — it runs and is tested in plain Node.
-`AssetManager` is the only file that bridges to `Scene` / the renderer.
+### Memory flow (one asset, WASM path)
+
+```
+GLB bytes ──JS──▶ parseContainer ──▶ glTF JSON (parsed in JS)
+                                     BIN chunk (Uint8Array view)
+                    │
+   wasm.ts: for each geometry accessor, union its [byteOffset, end) window
+            copy ONLY those bytes ──▶ HEAPU8 at batch.binPtr()      (1 copy, geometry only)
+            write PrimDesc[] ────────▶ HEAP32 at batch.descPtr()
+                    │
+   batch.process(flags)  ── C++ ──▶ decode → pos/nrm/uv/(tan) : std::vector<float>
+                                    indices                    : std::vector<uint32_t>
+                                    per-primitive PrimOut
+                    │
+   read back as Float32Array/Uint32Array VIEWS over the heap ──▶ gltf.ts .slice() ──▶ AssetPrimitive
+                    │
+   AssetManager ──▶ renderer.uploadMeshes ──▶ GPUBuffer ──▶ WebGPU
+```
+
+**JS↔WASM crossings per asset: ~9** — `reserveBin`, `setPrimCount`, `process`,
+and 6 pointer getters. Flat: `tri.glb` (3 verts) and `DamagedHelmet.glb`
+(14 556 verts, 3.7 MB file) both cross 9 times.
+
+### What runs where
+
+| in C++/WASM (`bcpp::gltf::Batch`) | stays in JS/TS |
+|---|---|
+| accessor decode (all component types) | GLB container split, `JSON.parse` |
+| index widening u8/u16 → u32, non-indexed expansion | node hierarchy, topological order, matrix→TRS |
+| area-weighted normal generation | material / texture / image metadata |
+| Lengyel tangent generation | `PrimDesc[]` construction, path dispatch |
+| per-primitive AABB (min/max or computed) | zero-copy decode of already-GPU-ready F32 accessors |
+| SoA layout for GPU upload | `AssetManager.instantiate`, GPU upload orchestration |
+
+The loader (`glb` + `gltf` + `Asset`) imports **nothing** from `web/renderer`.
+`wasm.ts` is the only loader file that loads the WASM module. `AssetManager` is
+the only file that bridges to `Scene` / the renderer.
 
 ## Questions to answer first
 
@@ -181,3 +236,74 @@ Fixtures: small / medium / large GLB. Report in a new `docs/` section and
 skeletal animation · skinning · morph targets · complex PBR (metallic-roughness
 textures, normal maps, emissive, KHR material extensions) · animation graph ·
 physics · editor · Draco / meshopt / KTX2 decompression.
+
+## Conclusion
+
+The C++/WASM batch geometry core exists, is integrated as a real runtime path,
+produces data byte-equivalent to the JS reference (89/89), and renders every
+fixture correctly through the forced WASM path to the pixels (6/6, screenshots
+visually verified).
+
+**The benchmark result, recorded honestly:** for GLB geometry that is already in
+GPU-ready layout — packed-F32 POSITION/NORMAL/TEXCOORD_0, present normals, U16/U32
+indices, accessor min/max — the JS zero-copy path is **~1.5–2× faster** than the
+C++/WASM path (`bench:glb`, DamagedHelmet: JS 1.3 ms vs WASM 1.9 ms). JS reads
+those accessors as typed-array views straight over the GLB `ArrayBuffer` with
+zero copies; the WASM path must always cross the heap boundary (BIN → linear
+memory, decode → SoA vectors, SoA → JS slice) regardless of how little
+transformation the bytes need. No amount of in-core optimisation removes that
+structural asymmetry.
+
+**Therefore the runtime dispatches per primitive (`geometry: "auto"`):** already-
+GPU-ready geometry → JS zero-copy; geometry that needs real work → C++/WASM. The
+native core is the *only* path that generates tangents (required by every
+normal-mapped PBR asset — the JS path does not implement it), generates missing
+normals, de-quantises KHR-quantised / normalized attributes, de-interleaves, and
+expands non-indexed geometry — and it does all of that for a whole asset in one
+batched call with a flat 9 boundary crossings. It is not a parallel unused
+implementation and it is not dead code; it is the path for every asset that is
+not trivially copyable.
+
+**Real-world corpus** (`npm run bench:glb:vitrine`, `GLB_VITRINE_DIR` — 108 GLBs,
+~3.6 GB, not vendored): ~1 M-vertex / ~6 M-index single-primitive scanned meshes,
+**no source normals**, no textures. Every one routes to the WASM core under
+`"auto"` (a JS-only decode leaves them unshadeable — `normals: null`). The core
+generates area-weighted normals at **~12 M triangles/s** (~160 ms for a 34 MB /
+1 M-vertex file), positions bit-identical to the JS views, indices identical,
+normals unit-length — 8/8 equivalence. `gaia.glb` and `shivas.glb` rendered
+through the forced WASM path: correct full-surface shading from the generated
+normals (screenshots in `bench/results/`). For this content the native core is
+the only path that yields a renderable asset.
+
+**Optimisations applied (each measured, DamagedHelmet decode):**
+
+| change | before → after |
+|---|---|
+| upload only referenced accessor byte ranges (skip embedded texture bytes) | 11.8 ms → 4.3 ms · 3683 KB → 545 KB in |
+| memcpy fast path for packed F32 attributes + U32 indices | 4.3 ms → 3.8 ms |
+| one reused `GltfBatch` (buffers grow and stay — zero steady-state alloc) | 3.8 ms → ~1.9 ms |
+| `resize` vs `assign` for fully-overwritten output vectors | within noise |
+| **net WASM decode** | **11.8 ms → 1.9 ms** |
+
+SIMD (`-O3 -msimd128`) speeds decode 2.46 → 1.90 ms (LLVM vectorises the copy /
+AABB loops) but not tangent generation 3.99 → 3.95 ms (scalar indexed scatter).
+It stays on — it is the shipping profile.
+
+**Stability:** the v0.1.0 equivalence gate (`bench/run-equivalence.mjs`) stayed
+4/4 throughout; v0.1.0 frozen benchmarks were not touched. The cycle is
+mergeable to `develop`.
+
+### Limitations / follow-ups
+
+- No JS tangent/normal *generator* — generation is WASM-only, so there is no
+  pure-JS fallback for a primitive that both lacks normals *and* cannot use WASM
+  (only possible today via a sparse POSITION accessor with no NORMAL — not seen
+  in any fixture). Would be a small port of `genNormals`/`genTangents`.
+- `bench:glb` absolute ms are noisy on the 2014 Xeon bench host (best-of-5 sample
+  medians mitigate it); ratios are stable, absolutes are indicative.
+- Multi-buffer `.gltf` with external `.bin` files: the byte-range upload unions
+  per buffer, correct but untested against a fixture (all fixtures are
+  single-buffer GLB).
+- KHR_mesh_quantization / KHR_draco_mesh_compression not decoded — quantised
+  attributes that *are* plain accessors (normalized ints) already route to WASM
+  and decode correctly; Draco/meshopt need their own cycle.

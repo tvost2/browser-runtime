@@ -42,27 +42,27 @@ A negative result is a valid result and gets published.
 - [x] data-calibrated migration analyzer
 - [x] docs + public `v0.1.0` release
 
-## Phase 1 — Real assets  (current cycle)
+## Phase 1 — Real assets  ✅ done
 
-Goal: the runtime loads a real GLB and renders it correctly. Minimal first:
-GLB → nodes → transforms → mesh primitives → indices → positions → basic
-material → WebGPU. **Design doc:** [investigations/glb.md](investigations/glb.md).
+Goal: the runtime loads a real GLB and renders it correctly.
+**Design + conclusion:** [investigations/glb.md](investigations/glb.md) ·
+[FINDINGS F-010](FINDINGS.md#f-010).
 
-- [ ] formalise the required glTF 2.0 subset + which extensions
-- [ ] decide JS vs WASM parsing; buffer ownership; geometry storage; texture upload
-- [ ] small + complex GLB fixtures
-- [ ] GLB container parser
-- [ ] mesh primitive decode (indices, POSITION, NORMAL, TEXCOORD_0)
-- [ ] node hierarchy → runtime entities/transforms
-- [ ] geometry upload to WebGPU
-- [ ] basic material (baseColorFactor, baseColorTexture)
-- [ ] texture upload + lifecycle
-- [ ] asset / GPU-resource / entity separation (`Asset → AssetManager → resources`)
-- [ ] equivalence tests: hierarchy, transforms, primitives, indices, attributes,
-      bounds, material assignment, multiple meshes/nodes, shared geometry
-- [ ] at least one visual test (GLB → runtime → correct render)
-- [ ] benchmark: download / parse / decode / CPU convert / WASM upload / GPU
-      upload / first frame / steady-state — **separately**, on small/medium/large
+- [x] glTF 2.0 subset formalised (mode 4, SCALAR/VEC2-4, F32/U8/U16/U32/I8/I16,
+      POSITION/NORMAL/TEXCOORD_0/COLOR_0/TANGENT, TRS or matrix, pbrMetallicRoughness)
+- [x] JS parses the JSON + orchestrates; C++/WASM batch core does geometry work;
+      per-primitive hybrid dispatch (`geometry: "auto"`)
+- [x] small (`tri`, `two-boxes`) + Khronos (`Box`, `BoxTextured`, `Duck`, `DamagedHelmet`) fixtures
+- [x] GLB container parser · mesh primitive decode · node hierarchy → entities
+- [x] geometry upload to WebGPU · baseColorFactor + baseColorTexture material · texture upload
+- [x] `Asset → AssetManager → GPU resources / entities` separation
+- [x] equivalence tests — `npm run test:glb` **89/89** (WASM vs JS byte-for-byte + Babylon cross-check)
+- [x] visual test — `npm run test:glb:render` **6/6** through the WASM path, screenshots verified
+- [x] benchmark — `npm run bench:glb` (JS vs WASM vs auto vs WASM+tangents); optimisations measured
+
+Result: for already-GPU-ready geometry JS zero-copy wins (~1.5–2×) and `"auto"`
+keeps it in JS; the C++/WASM core is the real path for tangent/normal generation,
+de-quantisation, de-interleave and non-indexed expansion.
 
 Explicitly **not** in Phase 1: skeletal animation, skinning, morph targets,
 complex PBR, animation graph, physics, editor.

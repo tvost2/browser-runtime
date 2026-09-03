@@ -8,9 +8,17 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
-## F-010 · GLB — the loader belongs entirely in JavaScript (PROFILE + HYPOTHESIS)
+## F-010 · GLB — JS parses, a C++/WASM core does the geometry work, hybrid dispatch picks per primitive
 `node bench/make-glb-fixtures.mjs && node --expose-gc bench/run-glb-profile.mjs`
+`npm run build && npm run test:glb && npm run test:glb:render && npm run bench:glb`
 Cycle: [docs/investigations/glb.md](investigations/glb.md). Branch `feat/glb-loader`.
+
+> **Update (WASM-core cycle).** The PROFILE below stands. Its *conclusion* —
+> "the loader is 100 % JavaScript, WASM stays out" — was **superseded**: a
+> follow-up cycle implemented the C++/WASM batch geometry core, integrated it as
+> the real runtime path, validated numerical equivalence, rendered every fixture
+> through it, and benchmarked JS vs WASM vs hybrid. Results in
+> **VALIDATE / RENDER / BENCHMARK / DECIDE** below.
 
 **PROFILE** — raw cost of what a loader must do, before any loader exists:
 
@@ -63,9 +71,124 @@ The loader is pure JS with zero renderer/WASM imports (runs in Node).
 - unsupported input is surfaced in `asset.ignored[]`, not dropped: Duck's
   camera, DamagedHelmet's normal/occlusion/metallicRoughness textures.
 
-Still open in this cycle: VALIDATE (render — a browser test that instantiates a
-fixture and renders it), BENCHMARK (download/parse/decode/GPU-upload/first-frame),
-DECIDE.
+**IMPLEMENT (C++/WASM core)** — `native/include/bcpp/gltf.hpp` (`bcpp::gltf::Batch`)
++ `native/bindings/asset.cpp` (embind `GltfBatch`). One contiguous BIN blob + a
+flat `PrimDesc[]` table in → concatenated SoA `pos / nrm / uv / tan` + `idx` +
+`PrimOut[]` out. One `process()` call decodes every primitive of an asset: accessor
+decode (with a memcpy fast path for tightly-packed F32 and U32 indices), index
+widening (u8/u16 → u32), non-indexed expansion, area-weighted normal generation
+when a primitive has none, Lengyel tangent generation on request, AABB (accessor
+min/max or computed). **~9 JS↔WASM crossings per asset**, flat regardless of
+vertex count — never per-primitive, never per-vertex. JS side (`web/asset/wasm.ts`)
+parses the glTF JSON, builds `PrimDesc`, uploads **only the byte ranges the
+geometry accessors touch** (not the embedded texture bytes in the BIN), and reads
+outputs back as typed-array views. One reused `GltfBatch` instance — its buffers
+grow and stay, so steady-state decoding does zero WASM-heap allocation.
+
+Integration (`web/asset/gltf.ts`): `geometry: "auto" | "wasm" | "js"`, default
+`"auto"` — per primitive, geometry already in GPU-ready layout (packed-F32
+attributes, normals present, U16/U32 indices, accessor min/max) takes the JS
+**zero-copy view** path; anything needing real work (tangent generation, missing
+normals, de-quantising normalized/integer attrs, de-interleaving, non-indexed
+expansion) goes to the C++/WASM core. `scene.loadAsset(url, { geometry, generateTangents })`
+threads the choice through. Sparse accessors and `COLOR_0` always use JS.
+
+**VALIDATE (equivalence)** — `npm run test:glb`: **89/89**.
+- `tri.glb` / `two-boxes.glb` forced through the WASM core, checked against exact
+  known values (positions bit-identical, normals bit-identical, u32 indices, AABB
+  from accessor min/max, hierarchy/TRS, material factors).
+- every fixture: **WASM output vs the JS reference decoder** — positions
+  bit-identical (`maxΔ = 0`), indices identical, UVs bit-identical, normals within
+  `3e-4` where the source had them, AABB within `1e-4`, node/mesh/primitive/material
+  counts and total vertex/index counts equal, generated normals unit-length.
+- `"auto"` dispatch produces byte-identical data to the JS reference on every
+  fixture (it just chooses the faster path).
+- Babylon.js cross-check: vertex counts match `@babylonjs/loaders` (Box 24,
+  BoxTextured 24, Duck 2399, DamagedHelmet 14556).
+
+**RENDER** — `npm run test:glb:render` (Playwright + Chromium WebGPU / WARP):
+every fixture loaded **forcing `geometry: "wasm"` + tangent generation**, all the
+way to the pixels. `tri` · `two-boxes` · Khronos `Box` · `BoxTextured` · `Duck` ·
+`DamagedHelmet` — **6/6 PASS**: geometry path = wasm, instances in frustum,
+draw-call count sane, depth headroom (no F-009 z-collapse), no GPU validation
+errors, not a black frame. Screenshots in `bench/results/glb-*.png` visually
+verified: red cubes with correct parent/child transforms, the Duck yellow with
+its texture, BoxTextured showing the UV test pattern, DamagedHelmet with its
+base-colour texture and shape. Two bugs found and fixed here that the numerical
+tests could not catch (F-009 lesson):
+- `defaultTex` 1×1 write had no `bytesPerRow` → device-level validation error that
+  poisoned every later bind group. `writeTexture` needs an explicit data layout.
+- `decodeImage` read `ImageBitmap.width/height` *after* `.close()` → `0×0` →
+  `createTexture` rejected. Read dimensions before closing.
+
+**BENCHMARK** — `npm run bench:glb`. Node, no renderer. Full `decodeGLB`, median
+ms, bench host (numbers ~3× a modern laptop; ratios hold). WASM module init
+one-off ≈ 70 ms.
+
+| fixture | verts | idx | JS | WASM | auto | WASM+tan | JS/WASM | →wasm |
+|---|---|---|---|---|---|---|---|---|
+| tri | 3 | 3 | 0.07 | 0.15 | 0.06 | 0.20 | 0.47× | 0 KB |
+| two-boxes | 24 | 36 | 0.10 | 0.12 | 0.05 | 0.10 | 0.80× | 1 KB |
+| Box | 24 | 36 | 0.11 | 0.12 | 0.06 | 0.10 | ~1× | 1 KB |
+| BoxTextured | 24 | 36 | 0.09 | 0.15 | 0.10 | 0.12 | 0.62× | 1 KB |
+| Duck | 2 399 | 12 636 | 0.41 | 0.49 | 0.34 | 0.78 | 0.83× | 100 KB |
+| DamagedHelmet | 14 556 | 46 356 | 1.29 | 1.87 | 1.21 | 3.41 | 0.69× | 545 KB |
+
+- **For geometry already in GPU-ready layout, JS is faster** (0.5–0.9×). JS reads
+  packed-F32 attributes as zero-copy typed-array views over the GLB ArrayBuffer —
+  0 copies. The WASM path must cross the heap (BIN→heap, decode→SoA, SoA→JS slice)
+  no matter how little "processing" the data needs. This is recorded as a
+  technical result: **`"auto"` keeps these primitives in JS.**
+- **The WASM core carries its own weight where there is work to do.** Tangent
+  generation (needed by every normal-mapped PBR asset — the JS path does not
+  implement it at all) is `WASM+tan`. Missing-normal generation, KHR-quantised /
+  normalized attributes, interleaved buffers, non-indexed geometry all route to
+  WASM under `"auto"`.
+- Optimisations applied this cycle, each measured on DamagedHelmet:
+  upload only referenced byte ranges (11.8 → 4.3 ms, 3683 → 545 KB in) ·
+  memcpy fast paths for packed F32 + U32 indices (4.3 → 3.8 ms) ·
+  one reused `GltfBatch`, no per-call allocation (3.8 → ~1.9 ms) ·
+  `resize` instead of `assign` for fully-overwritten output vectors (within noise).
+  Net WASM decode: **11.8 ms → 1.9 ms**.
+- SIMD (`-O3 -msimd128` vs `-O3`): decode 1.90 vs 2.46 ms (LLVM vectorises the
+  copy/AABB loops); tangent gen 3.95 vs 3.99 ms (scalar, indexed scatter — does
+  not vectorise). SIMD stays on (it is the shipping profile and it helps decode).
+- Crossings: **9 per asset**, tri.glb and the 3.7 MB DamagedHelmet alike.
+
+**RENDER + BENCHMARK — real heavy corpus** (`bench:glb:vitrine`, 108 GLBs, ~3.6 GB,
+`GLB_VITRINE_DIR`). These are ~1 M-vertex / ~6 M-index single-primitive scanned
+meshes with **no source normals** and no textures — the case the native core
+exists for. 8-file sample:
+
+| | verts | indices | JS* | WASM | auto | path | crossings |
+|---|---|---|---|---|---|---|---|
+| median | ~985 k | ~5.9 M | 0.3 ms | ~160 ms | ~160 ms | wasm | 9 |
+
+- `JS*` is **zero-copy view creation only** — 0.3 ms because it does no work and
+  **leaves normals `null`**. A JS-only decode of this corpus does not produce a
+  shadeable mesh. There is no JS normal generator.
+- `"auto"` routes **every** model to the C++/WASM core, which generates
+  area-weighted normals at **~12 M triangles/s (~168 ms / M verts)**, positions
+  bit-identical to the JS views, indices identical, generated normals unit-length
+  (8/8 equivalence PASS). **9 crossings** for a 34 MB file.
+- Rendered through the forced WASM path (`test:glb:render`): `gaia.glb` (1.0 M
+  verts) and `shivas.glb` (0.76 M verts) both render correctly — full surface
+  shading from the generated normals, screenshots in `bench/results/`. Decode +
+  normal-gen ~250–650 ms, one draw call, no GPU errors.
+
+This is the concrete answer to "is the native core dead code": for the real
+content in hand, it is the **only** path that yields a renderable asset.
+
+**DECIDE** — **Keep the C++/WASM batch core as the real runtime path for geometry
+that needs work; keep the JS zero-copy path for geometry that does not; dispatch
+per primitive (`"auto"`).** The native core is not dead code — it is the only
+path that generates tangents and normals, de-quantises, de-interleaves, and
+expands non-indexed geometry, and it does so in one batched call with a flat 9
+crossings. The benchmark says plainly that a straight copy of already-GPU-ready
+F32 is cheaper in JS than across the WASM heap; the runtime honours that. Both
+paths are proven byte-equivalent (89/89) and both render correctly (6/6). The
+cycle is mergeable: `develop` stays green (v0.1.0 equivalence gate 4/4 throughout),
+v0.1.0 benchmarks untouched.
 
 ---
 
