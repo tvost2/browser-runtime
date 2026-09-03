@@ -67,7 +67,8 @@
     "bench:scene": "node --expose-gc bench/run-scene-incremental.mjs",
     "bench:renderer": "node --expose-gc bench/run-renderer-incremental.mjs",
     "bench:renderer:gpu": "node bench/run-renderer-gpu.mjs",
-    "test:render:patch": "node bench/run-render-patch.mjs"
+    "test:render:patch": "node bench/run-render-patch.mjs",
+    "compare": "node web/harness/vitrine-compare/serve.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.0"

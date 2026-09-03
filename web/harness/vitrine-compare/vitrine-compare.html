@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Browser Runtime vs Babylon.js — vitrine GLBs</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0a0d12; color: #cdd6e4;
+    font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  header { display: flex; gap: 14px; align-items: center; padding: 0 14px;
+    border-bottom: 1px solid #1c2430; height: 46px; overflow: hidden; flex: none; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: .2px; white-space: nowrap; }
+  select { max-width: 240px; }
+  select, button { background: #141b26; color: #cdd6e4; border: 1px solid #2a3646;
+    border-radius: 6px; padding: 5px 9px; font: inherit; }
+  button { cursor: pointer; }
+  button:hover { background: #1b2534; }
+  body { display: flex; flex-direction: column; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #1c2430; flex: 1; min-height: 0; }
+  .pane { position: relative; background: #0a0d12; overflow: hidden; }
+  .pane canvas { width: 100%; height: 100%; display: block; }
+  .tag { position: absolute; top: 10px; left: 12px; font-weight: 700; font-size: 12px;
+    letter-spacing: .4px; padding: 3px 8px; border-radius: 5px; }
+  .tag.wasm { background: #10331f; color: #6ee7a0; }
+  .tag.bab { background: #331025; color: #f0a; }
+  .stats { position: absolute; left: 12px; bottom: 12px; font: 11px/1.55 ui-monospace, monospace;
+    white-space: pre; color: #9fb0c4; text-shadow: 0 0 4px #000; }
+  .adv { position: absolute; right: 12px; top: 10px; max-width: 300px; text-align: right;
+    font-size: 11px; color: #7f93aa; }
+  .adv b { color: #cdd6e4; }
+  #err { position: fixed; left: 50%; top: 60px; transform: translateX(-50%); background: #3a1520;
+    color: #ffb4c4; padding: 8px 14px; border-radius: 6px; display: none; z-index: 9; }
+</style>
+<header>
+  <h1>Browser Runtime <span style="color:#5a6b80">(C++/WASM + WebGPU)</span> &nbsp;vs&nbsp; Babylon.js</h1>
+  <select id="model"></select>
+  <button id="reload">reload both</button>
+  <label style="color:#7f93aa"><input type="checkbox" id="spin" checked> spin</label>
+  <span style="color:#4a5b70; font-size:11px">left: C++/WASM decode + WebGPU · right: JS decode + WebGL — open in a browser with a real GPU for representative frame times</span>
+  <span id="dir" style="color:#3a4b60; margin-left:auto; font-size:11px"></span>
+</header>
+<div id="err"></div>
+<div class="grid">
+  <div class="pane">
+    <div class="tag wasm">BROWSER RUNTIME</div>
+    <div class="adv" id="advL"></div>
+    <canvas id="cL"></canvas>
+    <div class="stats" id="sL">loading…</div>
+  </div>
+  <div class="pane">
+    <div class="tag bab">BABYLON.JS</div>
+    <div class="adv" id="advR"></div>
+    <canvas id="cR"></canvas>
+    <div class="stats" id="sR">loading…</div>
+  </div>
+</div>
+<script type="module" src="./vitrine-compare.mjs"></script>
