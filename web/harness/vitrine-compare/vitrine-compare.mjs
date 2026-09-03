@@ -28,6 +28,69 @@ function adapterIsSoftware(adapter) {
   return /warp|swiftshader|llvmpipe|basic render|microsoft basic|software|lavapipe/.test(s);
 }
 
+// World-space AABB of a decoded Asset → { center, radius }. Row-major, row-vector
+// (engine convention: world = local · parentWorld; p' = [p,1] · M). Nodes are
+// topological (parents first) so one forward pass builds every world matrix.
+function frameAsset(a) {
+  const I = () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+  const mul = (x, y) => { const o = new Array(16);
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++)
+      o[r*4+c] = x[r*4]*y[c] + x[r*4+1]*y[4+c] + x[r*4+2]*y[8+c] + x[r*4+3]*y[12+c];
+    return o; };
+  const trs = (t, q, s) => {
+    const [x,y,z,w] = q, x2=x+x,y2=y+y,z2=z+z;
+    const xx=x*x2,xy=x*y2,xz=x*z2,yy=y*y2,yz=y*z2,zz=z*z2,wx=w*x2,wy=w*y2,wz=w*z2;
+    return [
+      (1-(yy+zz))*s[0], (xy+wz)*s[0],     (xz-wy)*s[0],     0,
+      (xy-wz)*s[1],     (1-(xx+zz))*s[1], (yz+wx)*s[1],     0,
+      (xz+wy)*s[2],     (yz-wx)*s[2],     (1-(xx+yy))*s[2], 0,
+      t[0], t[1], t[2], 1,
+    ];
+  };
+  const W = [];
+  let mn = [Infinity,Infinity,Infinity], mx = [-Infinity,-Infinity,-Infinity];
+  for (let i = 0; i < a.nodes.length; i++) {
+    const n = a.nodes[i];
+    const local = trs(n.translation, n.rotation, n.scale);
+    W[i] = n.parent >= 0 && W[n.parent] ? mul(local, W[n.parent]) : local;
+    if (n.mesh < 0 || !a.meshes[n.mesh]) continue;
+    const M = W[i];
+    for (const p of a.meshes[n.mesh].primitives) {
+      const pos = p.positions;
+      if (pos && pos.length >= 3) {
+        // scan the actual vertices — this is exactly what the GPU rasterises,
+        // so the camera can never be framed on stale/other data
+        for (let k = 0; k < pos.length; k += 3) {
+          const lx = pos[k], ly = pos[k+1], lz = pos[k+2];
+          const wx = M[0]*lx + M[4]*ly + M[8]*lz + M[12];
+          const wy = M[1]*lx + M[5]*ly + M[9]*lz + M[13];
+          const wz = M[2]*lx + M[6]*ly + M[10]*lz + M[14];
+          if (wx<mn[0]) mn[0]=wx; if (wx>mx[0]) mx[0]=wx;
+          if (wy<mn[1]) mn[1]=wy; if (wy>mx[1]) mx[1]=wy;
+          if (wz<mn[2]) mn[2]=wz; if (wz>mx[2]) mx[2]=wz;
+        }
+        continue;
+      }
+      const lo = p.aabbMin, hi = p.aabbMax;
+      if (!lo || !hi) continue;
+      for (let c = 0; c < 8; c++) {
+        const lx = (c&1)?hi[0]:lo[0], ly = (c&2)?hi[1]:lo[1], lz = (c&4)?hi[2]:lo[2];
+        const wx = M[0]*lx + M[4]*ly + M[8]*lz + M[12];
+        const wy = M[1]*lx + M[5]*ly + M[9]*lz + M[13];
+        const wz = M[2]*lx + M[6]*ly + M[10]*lz + M[14];
+        if (wx<mn[0]) mn[0]=wx; if (wx>mx[0]) mx[0]=wx;
+        if (wy<mn[1]) mn[1]=wy; if (wy>mx[1]) mx[1]=wy;
+        if (wz<mn[2]) mn[2]=wz; if (wz>mx[2]) mx[2]=wz;
+      }
+    }
+  }
+  if (!(mn[0] <= mx[0]) || !isFinite(mn[0]+mx[0])) { mn = [-1,-1,-1]; mx = [1,1,1]; }
+  return {
+    center: [(mn[0]+mx[0])/2, (mn[1]+mx[1])/2, (mn[2]+mx[2])/2],
+    radius: Math.max(1e-3, Math.hypot(mx[0]-mn[0], mx[1]-mn[1], mx[2]-mn[2]) / 2),
+  };
+}
+
 const sel = $("model");
 const dpr = Math.min(devicePixelRatio, 2);
 // size both canvases ONCE, before any engine is created (a WebGPU context /
@@ -90,33 +153,15 @@ async function loadRuntime(url) {
   const loadMs = performance.now() - t0;
   const a = result.asset;
 
-  // frame the world-space AABB of the mesh-bearing nodes only (skip
-  // transform-only parents — AssetManager marks those invisible)
-  rt.engine.core.markHierarchyDirty();
-  rt.scene.evaluate(cL.width / cL.height);
-  const wm = rt.engine.core.worldMatrices();
-  const C = rt.engine.core.components;
-  let mn = [1e30, 1e30, 1e30], mx = [-1e30, -1e30, -1e30];
-  for (let i = 0; i < rt.engine.core.count; i++) {
-    if (!(C.flags[i] & 0b010)) continue;                 // F_VISIBLE — real render nodes
-    const b = rt.scene._meshBounds.get(C.meshId[i]);
-    if (!b) continue;
-    const m = wm.subarray(i * 16, i * 16 + 16);
-    for (let c = 0; c < 8; c++) {
-      const lx = (c & 1) ? b.max[0] : b.min[0], ly = (c & 2) ? b.max[1] : b.min[1], lz = (c & 4) ? b.max[2] : b.min[2];
-      const w = 1 / (lx * m[3] + ly * m[7] + lz * m[11] + m[15]);
-      mn = [Math.min(mn[0], (lx * m[0] + ly * m[4] + lz * m[8] + m[12]) * w),
-            Math.min(mn[1], (lx * m[1] + ly * m[5] + lz * m[9] + m[13]) * w),
-            Math.min(mn[2], (lx * m[2] + ly * m[6] + lz * m[10] + m[14]) * w)];
-      mx = [Math.max(mx[0], (lx * m[0] + ly * m[4] + lz * m[8] + m[12]) * w),
-            Math.max(mx[1], (lx * m[1] + ly * m[5] + lz * m[9] + m[13]) * w),
-            Math.max(mx[2], (lx * m[2] + ly * m[6] + lz * m[10] + m[14]) * w)];
-    }
-  }
-  if (mn[0] > mx[0]) { mn = [-1, -1, -1]; mx = [1, 1, 1]; }
-  const ctr = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
-  const rad = Math.max(1e-3, Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2);
-  rt.center = ctr; rt.radius = rad;
+  // Frame the model from the DECODED ASSET, not from engine state. The old path
+  // read scene._meshBounds + world matrices right after the first evaluate(); on
+  // a loaded machine (phone, Babylon decoding in parallel) that raced and left
+  // the camera pointing at empty space — model rendered, but off-screen. The
+  // asset's per-primitive aabbMin/Max (from the glTF accessors) + node TRS are
+  // deterministic and available immediately.
+  const bounds = frameAsset(a);
+  rt.center = bounds.center; rt.radius = bounds.radius;
+  const ctr = bounds.center, rad = bounds.radius;
   rt.scene.camera.target = ctr;
   rt.scene.camera.fovY = 0.8;
   // the camera orbits at ~2.6·r; keep far/near small (~40) so hyperbolic depth
