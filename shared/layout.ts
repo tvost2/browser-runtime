@@ -34,6 +34,7 @@ export const CullStrategy = {
   None: 2,
   Bvh: 3,              // spatial-index traversal — best for a moving camera over a large scene
   Auto: 4,             // per frame: Bvh while the camera moves over a big scene, else Standard (default)
+  Gpu: 5,             // transform on CPU (incremental), cull + compaction + draw-args on a compute shader
 } as const;
 export type CullStrategy = (typeof CullStrategy)[keyof typeof CullStrategy];
 

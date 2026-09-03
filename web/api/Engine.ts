@@ -12,7 +12,7 @@
 import { WasmCore } from "../bindings/WasmCore.js";
 import { Renderer } from "../renderer/Renderer.js";
 import { Scene } from "./Scene.js";
-import type { FrameResult } from "../../shared/layout.js";
+import { CullStrategy, type FrameResult } from "../../shared/layout.js";
 
 export interface FrameInfo {
   frame: number;
@@ -99,7 +99,17 @@ export class Engine {
     const result = scene.evaluate(aspect);
     const evalMs = performance.now() - tEval;
 
-    this.renderer.render(scene.camera.viewProj(aspect), result);
+    const vp = scene.camera.viewProj(aspect);
+    let gpuVisible = result.visibleCount;
+    let gpuDraws = result.batches.length;
+    if (scene.cullStrategy === CullStrategy.Gpu) {
+      const g = this.core.gpuState();
+      this.renderer.renderGpu(vp, g);
+      gpuDraws = g.numBuckets;
+      gpuVisible = -1; // the GPU knows; reading it back would stall
+    } else {
+      this.renderer.render(vp, result);
+    }
     const cpuMs = performance.now() - t0;
 
     this._emaCpu = this._emaCpu ? this._emaCpu * 0.9 + cpuMs * 0.1 : cpuMs;
@@ -109,8 +119,8 @@ export class Engine {
       frame: this._frame, cpuFrameMs: this._emaCpu, evalMs: this._emaEval,
       gpuMs: this.renderer.canTimestamp ? this.renderer.gpuMs : null,
       fps: 1000 / this._emaCpu,
-      visible: result.visibleCount, entities: this.core.count,
-      batches: result.batches.length, drawCalls: result.batches.length,
+      visible: gpuVisible, entities: this.core.count,
+      batches: gpuDraws, drawCalls: gpuDraws,
       wasmHeapMB: this.core.heapBytes / 1048576,
       jsHeapMB: perfMem ? perfMem.usedJSHeapSize / 1048576 : null,
     };

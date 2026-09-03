@@ -25,6 +25,8 @@ interface WasmWorld {
   visibleIdPtr(): number; instanceWorldPtr(): number; instanceMeshIdPtr(): number;
   batchesPtr(): number; batchCount(): number;
   worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
+  gpuBucketCount(): number; gpuBucketMeshPtr(): number; gpuBucketOffsetPtr(): number;
+  gpuEntityBucketPtr(): number; recomputedPtr(): number; gpuLayoutRebuilt(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
   sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
@@ -162,6 +164,29 @@ export class WasmCore {
         transformUs: w.sTransformUs(), cullUs: w.sCullUs(), listUs: w.sListUs(),
         listRebuilt: w.sListRebuilt(), dirtySlots: w.sDirtySlots(),
       },
+    };
+  }
+
+  /** Views the GPU-cull renderer needs after an `evaluate(CullStrategy.Gpu)`.
+   *  Valid until the next evaluate()/resize(). */
+  gpuState() {
+    const w = this.world, m = this.mod;
+    this._syncViews();
+    const count = this._count;
+    const nb = w.gpuBucketCount();
+    const bucketMesh = new Uint32Array(m.HEAPU32.buffer, w.gpuBucketMeshPtr(), Math.max(1, nb)).subarray(0, nb);
+    return {
+      count,
+      numBuckets: nb,
+      bucketMesh,
+      bucketOffset: new Uint32Array(m.HEAPU32.buffer, w.gpuBucketOffsetPtr(), nb + 1),
+      entityBucket: new Uint32Array(m.HEAPU32.buffer, w.gpuEntityBucketPtr(), count),
+      worldMats: new Float32Array(m.HEAPF32.buffer, w.worldMatricesPtr(), count * 16),
+      worldSphere: new Float32Array(m.HEAPF32.buffer, w.worldSpherePtr(), count * 4),
+      flags: new Uint32Array(m.HEAPU32.buffer, w.flagsPtr(), count),
+      recomputed: new Uint8Array(m.HEAPU8.buffer, w.recomputedPtr(), count),
+      layoutChanged: !!w.gpuLayoutRebuilt(),
+      frameChanged: !!w.sFrameChanged(),
     };
   }
 

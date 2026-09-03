@@ -10,6 +10,9 @@ import { Engine, box } from "../dist/engine.js";
 const qs = new URLSearchParams(location.search);
 const COUNT = Number(qs.get("count") || 100000);
 const STRAT = Number(qs.get("strategy") ?? 4);
+const STRAT_NAMES = ["Standard", "Sphere", "None", "Bvh", "Auto", "Gpu"];
+if (qs.get("scenario")) window.__scenario = qs.get("scenario");
+if (qs.get("moverRatio")) window.__moverRatio = Number(qs.get("moverRatio"));
 
 const canvas = document.getElementById("c");
 const hud = document.getElementById("hud");
@@ -72,12 +75,13 @@ function frame() {
   window.__bench?.collect?.();
   acc += st.cpuFrameMs; accN++;
   if (accN >= 20) {
+    const upB = STRAT === 5 ? (engine.renderer.lastGpuUploadBytes ?? 0) : engine.renderer.lastUploadBytes;
     hud.textContent =
-      `count ${COUNT.toLocaleString()}  strategy ${["Standard", "Sphere", "None", "Bvh", "Auto"][STRAT]}\n` +
+      `count ${COUNT.toLocaleString()}  strategy ${STRAT_NAMES[STRAT] ?? STRAT}\n` +
       `scenario ${window.__scenario || "static"}\n` +
       `cpu ${(acc / accN).toFixed(3)} ms   gpu ${(st.gpuMs ?? 0).toFixed(2)} ms   fps ${st.fps.toFixed(0)}\n` +
       `visible ${st.visible.toLocaleString()}   draws ${st.drawCalls}\n` +
-      `upload ${(engine.renderer.lastUploadBytes / 1024).toFixed(0)} KB`;
+      `upload ${(upB / 1024).toFixed(0)} KB`;
     acc = 0; accN = 0;
   }
   requestAnimationFrame(frame);
@@ -95,7 +99,7 @@ window.__bench = {
     const st = engine.stats;
     const ev = scene._lastFrame;
     acc2.cpu.push(st.cpuFrameMs); acc2.gpu.push(st.gpuMs ?? 0);
-    acc2.up.push(engine.renderer.lastUploadBytes);
+    acc2.up.push(STRAT === 5 ? (engine.renderer.lastGpuUploadBytes ?? 0) : engine.renderer.lastUploadBytes);
     if (ev) {
       acc2.tr.push(ev.stats.transformUs); acc2.cu.push(ev.stats.cullUs); acc2.li.push(ev.stats.listUs);
       acc2.reb.push(ev.stats.listRebuilt); acc2.dirty.push(ev.stats.dirtySlots);
@@ -115,5 +119,23 @@ window.__bench = {
       wasmHeapMB: engine.stats.wasmHeapMB, jsHeapMB: engine.stats.jsHeapMB,
     };
   },
+};
+// GPU-cull equivalence: the visible id set the compute shader produced,
+// vs the CPU Standard path on the identical frame.
+window.__equiv = async () => {
+  const savedStrat = scene.cullStrategy, savedScen = window.__scenario;
+  window.__scenario = "frozen"; // apply() no-ops → identical camera for both passes
+  // nudge every entity so the transform pass fully repopulates world state, then
+  // let both strategies see the SAME frame
+  scene.cullStrategy = 0; engine.core.markAllDirty(); engine.renderOnce(); engine.renderOnce();
+  const cpu = new Set(scene._lastFrame.visibleIds);
+  scene.cullStrategy = 5; engine.core.markAllDirty(); engine.renderOnce(); engine.renderOnce();
+  const gpuIds = await engine.renderer.readbackGpuVisible();
+  const gpu = new Set(gpuIds);
+  scene.cullStrategy = savedStrat; window.__scenario = savedScen;
+  let missing = 0, extra = 0;
+  for (const id of cpu) if (!gpu.has(id)) missing++;
+  for (const id of gpu) if (!cpu.has(id)) extra++;
+  return { cpu: cpu.size, gpu: gpu.size, missing, extra };
 };
 window.__ready = true;

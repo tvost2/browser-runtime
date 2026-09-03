@@ -61,6 +61,14 @@ struct WasmWorld {
     int worldMinPtr()       { return P(w.worldMin.data()); }         // f32 x3 x count
     int worldMaxPtr()       { return P(w.worldMax.data()); }         // f32 x3 x count
 
+    // GPU-driven path (CullStrategy::Gpu)
+    uint32_t gpuBucketCount()   { return w.gpuBucketCount(); }
+    int gpuBucketMeshPtr()      { return P(w.gpuBucketMeshData()); }   // u32 x bucketCount   (meshId per bucket, draw order)
+    int gpuBucketOffsetPtr()    { return P(w.gpuBucketOffsetData()); } // u32 x (bucketCount+1) cumulative
+    int gpuEntityBucketPtr()    { return P(w.gpuEntityBucketData()); } // u32 x count
+    int recomputedPtr()         { return P(w.recomputedData()); }      // u8  x count — entities whose world matrix changed this frame
+    uint32_t gpuLayoutRebuilt() { return w.gpuLayoutRebuilt(); }       // 1 = per-entity buffers need re-upload
+
     // stats
     uint32_t sVisible()       { return w.stats.visible; }
     uint32_t sTraversed()     { return w.stats.traversed; }
@@ -126,6 +134,12 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("batchCount", &WasmWorld::batchCount)
         .function("worldMatricesPtr", &WasmWorld::worldMatricesPtr)
         .function("worldSpherePtr", &WasmWorld::worldSpherePtr)
+        .function("gpuBucketCount", &WasmWorld::gpuBucketCount)
+        .function("gpuBucketMeshPtr", &WasmWorld::gpuBucketMeshPtr)
+        .function("gpuBucketOffsetPtr", &WasmWorld::gpuBucketOffsetPtr)
+        .function("gpuEntityBucketPtr", &WasmWorld::gpuEntityBucketPtr)
+        .function("recomputedPtr", &WasmWorld::recomputedPtr)
+        .function("gpuLayoutRebuilt", &WasmWorld::gpuLayoutRebuilt)
         .function("worldMinPtr", &WasmWorld::worldMinPtr)
         .function("worldMaxPtr", &WasmWorld::worldMaxPtr)
         .function("sVisible", &WasmWorld::sVisible)

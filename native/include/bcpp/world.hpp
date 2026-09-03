@@ -30,6 +30,9 @@ enum class CullStrategy : uint32_t {
     None = 2,               // everything visible
     Bvh = 3,                // spatial-index traversal (best for a moving camera over a large scene)
     Auto = 4,               // per frame: Bvh while the camera moves over a big scene, else Standard
+    Gpu = 5,                // transform on CPU (incremental), cull + compaction + draw-args on the GPU
+                            // via a compute shader — CPU builds no render list, uploads only the
+                            // frustum + moved matrices per frame
 };
 
 // flag bits (mirror web/shared/flags.ts)
@@ -184,6 +187,23 @@ public:
         _prevCount = count;
         const double t1 = _now_us();
         stats.transformUs = (float)(t1 - t0);
+
+        // --- GPU-driven path: CPU is done after the transform pass. The compute
+        //     shader reads worldSphere[] + entityBucket[] and does frustum cull,
+        //     per-mesh atomic compaction and indirect-draw-args generation. We
+        //     only keep the bucket layout current (recomputed when meshId /
+        //     visibility flags change, not per frame). ---
+        if (strat == CullStrategy::Gpu) {
+            _gpuLayoutRebuilt = (structChanged || _meshLayoutDirty || _gpuBuckets.empty()) ? 1u : 0u;
+            if (_gpuLayoutRebuilt) buildGpuBuckets();
+            _meshLayoutDirty = false;
+            _lastStrat = strat;
+            stats.visible = 0;               // the GPU knows; CPU does not
+            stats.batches = (uint32_t)_gpuBucketMesh.size();
+            stats.frameChanged = (recomputed || camMoved || structChanged) ? 1u : 0u;
+            stats.cullUs = 0; stats.listUs = 0;
+            return;
+        }
 
         // Auto → concrete strategy for the rest of this frame: a BVH traversal
         // beats the O(n) linear re-test while the camera moves over a large
@@ -516,6 +536,51 @@ private:
         }
     }
     std::vector<uint32_t> _hist;
+
+    // ---- GPU-driven path: durable bucket layout (rebuilt only on meshId edits) ----
+    // Every entity gets a slot; bucket b covers entities [_gpuBucketOffset[b],
+    // _gpuBucketOffset[b+1]) and holds meshId _gpuBucketMesh[b]. The compute
+    // shader compacts visible entity ids into the front of each bucket.
+    std::vector<uint32_t> _gpuBucketMesh;    // distinct meshIds, ascending  (= draw order)
+    std::vector<uint32_t> _gpuBucketOffset;  // size numBuckets+1, cumulative
+    std::vector<uint32_t> _gpuEntityBucket;  // per entity → bucket index
+    std::vector<uint32_t> _gpuBuckets;       // scratch histogram, also the "built" flag
+    uint32_t _gpuLayoutRebuilt = 0;          // 1 = buildGpuBuckets() ran this frame → renderer re-uploads per-entity buffers
+
+    void buildGpuBuckets() {
+        _gpuBucketMesh.clear();
+        _gpuBucketOffset.clear();
+        _gpuEntityBucket.assign(count, 0);
+        if (count == 0) { _gpuBuckets.assign(1, 0); return; }
+
+        uint32_t maxMesh = 0;
+        for (uint32_t i = 0; i < count; ++i) maxMesh = std::max(maxMesh, meshId[i]);
+        _gpuBuckets.assign(maxMesh + 2, 0);
+        for (uint32_t i = 0; i < count; ++i) _gpuBuckets[meshId[i] + 1]++;
+
+        // meshId → bucket index, and cumulative offsets
+        std::vector<int32_t> meshToBucket(maxMesh + 1, -1);
+        uint32_t off = 0;
+        _gpuBucketOffset.push_back(0);
+        for (uint32_t m = 0; m <= maxMesh; ++m) {
+            const uint32_t n = _gpuBuckets[m + 1];
+            if (n == 0) continue;
+            meshToBucket[m] = (int32_t)_gpuBucketMesh.size();
+            _gpuBucketMesh.push_back(m);
+            off += n;
+            _gpuBucketOffset.push_back(off);
+        }
+        for (uint32_t i = 0; i < count; ++i)
+            _gpuEntityBucket[i] = (uint32_t)meshToBucket[meshId[i]];
+    }
+
+public:
+    uint32_t gpuBucketCount() const { return (uint32_t)_gpuBucketMesh.size(); }
+    const uint32_t* gpuBucketMeshData() const { return _gpuBucketMesh.data(); }
+    const uint32_t* gpuBucketOffsetData() const { return _gpuBucketOffset.data(); }
+    const uint32_t* gpuEntityBucketData() const { return _gpuEntityBucket.data(); }
+    const uint8_t*  recomputedData() const { return _recomputed.data(); }
+    uint32_t gpuLayoutRebuilt() const { return _gpuLayoutRebuilt; }
 };
 
 } // namespace bcpp
