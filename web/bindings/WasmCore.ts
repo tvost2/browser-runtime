@@ -61,6 +61,9 @@ export class WasmCore {
     const c = new WasmCore();
     c.mod = await loadEngineModule(wasmUrl) as unknown as EmModule;
     c.world = new c.mod.World();
+    // bind the component / viewProj views up front so they are never undefined —
+    // evaluate() may run (harness render loop) before the first setCount().
+    c.refreshComponentViews();
     c.initMs = performance.now() - t0;
     return c;
   }
@@ -106,7 +109,13 @@ export class WasmCore {
     C.flags = u32(w.flagsPtr(), cap * STRIDE.flags);
     C.dirty = new Uint8Array(m.HEAPU8.buffer, w.dirtyPtr(), cap);
     this.viewProj = f32(w.viewProjPtr(), 16);
+    this._viewsBuf = m.HEAPF32.buffer;
   }
+
+  /** ALLOW_MEMORY_GROWTH swaps the heap ArrayBuffer (e.g. a big GLB decode
+   *  between two evaluate()s); every cached view detaches. Cheap identity check. */
+  private _viewsBuf: ArrayBufferLike | null = null;
+  private _syncViews() { if (this.mod.HEAPF32.buffer !== this._viewsBuf) this.refreshComponentViews(); }
 
   /** All-entity world-space AABB (min, max). Views over WASM memory; valid until
    *  the next evaluate()/resize(). For the spatial index / physics sync / debug. */
@@ -118,18 +127,18 @@ export class WasmCore {
     };
   }
 
-  writeViewProj(m16: Float32Array) { this.viewProj.set(m16); }
+  writeViewProj(m16: Float32Array) { this._syncViews(); this.viewProj.set(m16); }
 
   /** One boundary crossing. Returns views over WASM memory — valid until next call. */
   evaluate(strategy: CullStrategy = CullStrategy.Standard, sortByMesh = true): FrameResult {
     const w = this.world, m = this.mod;
-    const bufBefore = m.HEAPU8.buffer;
+    this._syncViews();
     const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty, this._meshLayoutDirty);
     this._hierarchyDirty = false;
     this._meshLayoutDirty = false;
-    // evaluate() can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
+    // evaluate() itself can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
     // swaps every HEAP* and detaches the cached component / viewProj views.
-    if (m.HEAPU8.buffer !== bufBefore) this.refreshComponentViews();
+    this._syncViews();
 
     const bc = w.batchCount();
     const braw = new Uint32Array(m.HEAPU32.buffer, w.batchesPtr(), bc * STRIDE.batch);
