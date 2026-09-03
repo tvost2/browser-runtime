@@ -106,6 +106,38 @@ instances (black screen). Fixed by passing each bucket's base into
 `visibleIds` as a per-draw dynamic uniform-buffer offset instead of
 `firstInstance`.
 
+### Cell merge — 3,774 building meshes → ~90 draws (F-017)
+
+The near tier is thousands of individually-extruded footprints, each its own
+draw. The adapter now groups them by a **grid cell** (`DEFAULT_CELL` 1500 m) ×
+a coarse-quantised colour and hands each group to the C++ `mergeMeshes` kernel,
+which world-bakes + concatenates them into one mesh. A group is re-merged only
+when its membership changes (a cell streams in/out); big meshes (ground,
+far-tier merges, ≥ 12k verts) bypass the grid 1:1.
+
+Every merged vertex keeps its source mesh's `uniqueId`, so `runtimePick(x, y)`
+resolves the individual building through the renderer's `r32uint` id buffer —
+verified against Babylon's own picker on the live twin.
+
+Measured on the live twin (WARP, camera over central Uberlândia, ~3,774
+resident building meshes):
+
+| | per-mesh (`CullStrategy.Gpu`) | cell merge (`CullStrategy.Auto`) |
+|---|---|---|
+| draw calls (visible) | ~1,150–1,500 | **~90** |
+| runtime entities | 3,774 | **~690** |
+| `cpu frame` | ~2 ms | **~0.8 ms** |
+| pick | Babylon raycast | + pixel-accurate id buffer |
+
+`CullStrategy` flips to `Auto` in merge mode — with the entity count collapsed
+the incremental CPU cull beats the GPU compute path (whose dispatch overhead
+now dominates), and `pickAt` needs the CPU render list anyway. Toggle from the
+console: `__RTR.runtimeSetMerge(false)` / `window.__twinCell = 2500`.
+
+**Still fragmented by colour** (~36 quantised materials → ~690 groups, not
+~50). The clean fix is a per-vertex colour attribute on the merged mesh so a
+cell is one group regardless of colour — next step.
+
 ### Honest limitations
 
 - **No lighting** in the runtime path — flat unlit colour per face

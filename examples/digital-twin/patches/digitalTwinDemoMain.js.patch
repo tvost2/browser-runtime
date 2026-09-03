@@ -124,3 +124,10 @@
    if (smartCityWindow) {
      const now = Date.now();
      if (now - lastSmartCityWindowCheckAt >= SMART_CITY_WINDOW_CHECK_INTERVAL_MS) {
+
+--- a/src/digitalTwin/digitalTwinDemoMain.js
++++ b/src/digitalTwin/digitalTwinDemoMain.js
+@@ updateRuntimeHud @@
+     `draws ${st.drawCalls}   ·   ${vis} / ${st.entities.toLocaleString('pt-BR')} entidades\n` +
++    (info.merge ? `merge/célula  ${info.mergedGroups} grupos  ·  ${info.remergedLast} re-merge  ·  cell ${info.cell}\n` : '') +
+     `${(info.mirrorTris || 0).toLocaleString('pt-BR')} triângulos   ·   espelhar ${(info.mirrorMs || 0).toFixed(1)} ms /250ms\n` +
