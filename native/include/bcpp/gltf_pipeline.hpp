@@ -61,7 +61,8 @@ enum : int32_t {
 };
 
 struct Pipeline {
-    std::vector<uint8_t> blob;          // the GLB, copied in once
+    const uint8_t* blob = nullptr;      // GLB bytes (owned by the binding's inbuf — one copy JS->WASM, no second)
+    uint32_t       blobLen = 0;
     Container container;
     Document  doc;
     Batch     batch;                    // reused geometry core
@@ -78,11 +79,11 @@ struct Pipeline {
     // --- stage 1: copy blob in, split container, parse JSON + metadata ---
     uint32_t loadGLB(const uint8_t* p, uint32_t len) {
         double t0 = now_ms();
-        blob.assign(p, p + len);
+        blob = p; blobLen = len;           // no copy — the bytes already live in WASM memory
         counters[C_BLOB_BYTES] = (double)len;
 
         double tc = now_ms();
-        container = parseContainer(blob.data(), (uint32_t)blob.size());
+        container = parseContainer(blob, blobLen);
         timings[T_CONTAINER] = now_ms() - tc;
         if (!container.ok) { doc.error = container.error; loaded = false; timings[T_LOAD_TOTAL] = now_ms() - t0; return 0; }
         counters[C_JSON_BYTES] = (double)container.jsonLen;

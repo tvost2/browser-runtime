@@ -49,7 +49,9 @@ export class NativePipelineUnsupported extends Error {}
 const GEN_NORMALS = 1, GEN_TANGENTS = 2;
 const DNODE = 15, DMESH = 4, DPRIM = 8, DMAT = 15, DTEX = 2, DSAMP = 4, DIMG = 6, DBV = 4, DACC = 14, DOUT = 16;
 
-let cachedPipeline: any = null;
+// one GltfPipeline per module instance (matches acquireBatch in wasm.ts) — its
+// C++ vectors grow and stay, so steady-state decoding does no WASM-heap alloc.
+const pipelineCache = new WeakMap<object, any>();
 
 /** Decode a GLB entirely in C++/WASM. Throws NativePipelineUnsupported for
  *  primitives the batch core can't do (sparse accessors, COLOR_0). */
@@ -58,9 +60,8 @@ export async function decodeGLBNative(
   opts: { generateTangents?: boolean; wasmUrl?: string; reuse?: boolean } = {},
 ): Promise<Asset & { nativeStats: NativeDecodeStats }> {
   const mod = await loadEngineModule(opts.wasmUrl);
-  const pipe = opts.reuse !== false
-    ? (cachedPipeline ??= new mod.GltfPipeline())
-    : new mod.GltfPipeline();
+  let pipe = opts.reuse !== false ? pipelineCache.get(mod) : null;
+  if (!pipe) { pipe = new mod.GltfPipeline(); if (opts.reuse !== false) pipelineCache.set(mod, pipe); }
 
   let crossings = 0;
 

@@ -9,6 +9,7 @@ const qs = new URLSearchParams(location.search);
 const url = qs.get("url");
 const spin = qs.get("spin") !== "0";
 const geometry = qs.get("geom") || "auto";           // auto | wasm | js
+const parser = qs.get("parser") || "js";             // js | native
 const generateTangents = qs.get("tangents") === "1";
 const hud = document.getElementById("hud");
 const canvas = document.getElementById("c");
@@ -20,7 +21,7 @@ const engine = await Engine.create(canvas);
 const scene = engine.createScene();
 
 const t0 = performance.now();
-const { entities, result } = await scene.loadAsset(url, { geometry, generateTangents });
+const { entities, result } = await scene.loadAsset(url, { geometry, parser, generateTangents });
 const loadMs = performance.now() - t0;
 const asset = result.asset;
 
