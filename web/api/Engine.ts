@@ -105,7 +105,7 @@ export class Engine {
     if (scene.cullStrategy === CullStrategy.Gpu) {
       const g = this.core.gpuState();
       this.renderer.renderGpu(vp, g);
-      gpuDraws = g.numBuckets;
+      gpuDraws = this.renderer.drawCalls; // non-empty buckets actually issued
       gpuVisible = -1; // the GPU knows; reading it back would stall
     } else {
       this.renderer.render(vp, result);

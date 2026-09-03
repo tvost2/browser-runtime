@@ -205,6 +205,8 @@ export class Renderer {
   private vertCap = 0;    // capacity in vertices
   private idxCap = 0;     // capacity in indices
   private _defaultNrm = new Float32Array(0); // (0,1,0) filler for meshes with no normals
+  private _slotsVersion = 0;        // bumped whenever a mesh is added to the arena
+  private _gpuMeshInfoVersion = -1; // last _slotsVersion the GPU-cull meshInfo buffer was built from
   /** running total of geometry bytes pushed to the GPU (all uploads) */
   geomBytesTotal = 0;
   /** geometry bytes pushed on the last uploadMeshes() call */
@@ -380,7 +382,7 @@ export class Renderer {
 
   dispose() {
     for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead,
-      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gCullU]) b?.destroy();
+      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gCullU, this._bucketCntRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
     this.device.destroy();
@@ -471,6 +473,7 @@ export class Renderer {
       this.idxHead += m.indices.length;
     }
     this.geomBytesTotal += this.lastGeomUploadBytes;
+    this._slotsVersion++;
   }
 
   private growVerts(need: number) {
@@ -644,28 +647,38 @@ export class Renderer {
     }
     if (gpu.numBuckets > this.gBucketCap) {
       const cap = Math.max(gpu.numBuckets, this.gBucketCap * 2, 64);
-      for (const b of [this.gBucketOff, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs]) b?.destroy();
+      for (const b of [this.gBucketOff, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this._bucketCntRead]) b?.destroy();
       this.gBucketOff = d.createBuffer({ size: (cap + 1) * 4, usage: S | C });
-      this.gBucketCnt = d.createBuffer({ size: cap * 4, usage: S | C });
+      this.gBucketCnt = d.createBuffer({ size: cap * 4, usage: S | C | R });
       this.gMeshInfo = d.createBuffer({ size: cap * 16, usage: S | C });
       this.gDrawArgs = d.createBuffer({ size: cap * 20, usage: GPUBufferUsage.INDIRECT | S | R });
+      this._bucketCntRead = d.createBuffer({ size: cap * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      this._skipEmptyValid = false;
       this.gBucketCap = cap;
       rebind = true;
     }
 
-    if (gpu.layoutChanged || rebind) {
+    const layoutUp = gpu.layoutChanged || rebind;
+    if (layoutUp) {
       this.gBucketMesh = gpu.bucketMesh.slice(0, gpu.numBuckets);
       d.queue.writeBuffer(this.gEntBucket!, 0, gpu.entityBucket.buffer, gpu.entityBucket.byteOffset, gpu.count * 4);
       d.queue.writeBuffer(this.gBucketOff!, 0, gpu.bucketOffset.buffer, gpu.bucketOffset.byteOffset, (gpu.numBuckets + 1) * 4);
       d.queue.writeBuffer(this.gFlags!, 0, gpu.flags.buffer, gpu.flags.byteOffset, gpu.count * 4);
-      // per-bucket mesh geometry info, from the arena's slot table
+    }
+    // per-bucket mesh geometry info — refresh when the layout changed OR the mesh
+    // arena grew (a bucket's slot may not have existed when the layout was built).
+    if (layoutUp || this._slotsVersion !== this._gpuMeshInfoVersion) {
       const mi = new Uint32Array(gpu.numBuckets * 4);
       for (let b = 0; b < gpu.numBuckets; b++) {
         const s = this.slots.get(this.gBucketMesh[b]);
         if (s) { mi[b * 4] = s.indexCount; mi[b * 4 + 1] = s.firstIndex; mi[b * 4 + 2] = s.baseVertex; }
       }
       d.queue.writeBuffer(this.gMeshInfo!, 0, mi);
+      this._gpuMeshInfoVersion = this._slotsVersion;
+      this._gpuArgsValid = false; // args must recompute with the new mesh info
+    }
 
+    if (layoutUp) {
       this.gCullBind = d.createBindGroup({
         layout: this.cullLayout!,
         entries: [
@@ -713,6 +726,10 @@ export class Renderer {
   lastGpuUploadBytes = 0;
 
   private _gpuArgsValid = false;
+  private _bucketCntRead?: GPUBuffer;     // MAP_READ mirror of gBucketCnt (1 frame stale)
+  private _lastBucketCnt?: Uint32Array;   // per bucket: instances drawn last frame (0 → skip the indirect call)
+  private _bucketCntBusy = false;
+  private _skipEmptyValid = false;
 
   renderGpu(viewProj: Float32Array, gpu: GpuFrame) {
     const d = this.device;
@@ -775,8 +792,13 @@ export class Renderer {
     pass.setVertexBuffer(2, this.uvBuf);
     pass.setIndexBuffer(this.ibuf, "uint32");
     this.drawCalls = 0;
+    // skip the indirect call for buckets that drew nothing last frame (~1 frame
+    // stale — a bucket entering the frustum pops in one frame late). Reset when
+    // the bucket layout shifts.
+    const skip = this._skipEmptyValid && !gpu.layoutChanged ? this._lastBucketCnt : null;
     let curPipe: GPURenderPipeline | null = null;
     for (let b = 0; b < gpu.numBuckets; b++) {
+      if (skip && skip[b] === 0) continue;
       const matId = this.meshMaterial.get(this.gBucketMesh[b]) ?? 0;
       const m = this.materials.get(matId) ?? this.materials.get(0)!;
       const pipe = m.doubleSided ? this.pipelineGpuNoCull! : this.pipelineGpu!;
@@ -792,7 +814,24 @@ export class Renderer {
       enc.resolveQuerySet(this.qset!, 0, 2, this.qResolve!, 0);
       enc.copyBufferToBuffer(this.qResolve!, 0, this.qRead!, 0, 16);
     }
+    // pull back the per-bucket instance counts (non-blocking) for next frame's skip list
+    if (recull && !this._bucketCntBusy && this._bucketCntRead && this._bucketCntRead.mapState === "unmapped") {
+      enc.copyBufferToBuffer(this.gBucketCnt!, 0, this._bucketCntRead, 0, gpu.numBuckets * 4);
+    }
     d.queue.submit([enc.finish()]);
+
+    if (recull && !this._bucketCntBusy && this._bucketCntRead && this._bucketCntRead.mapState === "unmapped") {
+      this._bucketCntBusy = true;
+      const nb = gpu.numBuckets;
+      this._bucketCntRead.mapAsync(GPUMapMode.READ).then(() => {
+        const src = new Uint32Array(this._bucketCntRead!.getMappedRange());
+        if (!this._lastBucketCnt || this._lastBucketCnt.length < nb) this._lastBucketCnt = new Uint32Array(nb);
+        this._lastBucketCnt.set(src.subarray(0, nb));
+        this._bucketCntRead!.unmap();
+        this._skipEmptyValid = true;
+        this._bucketCntBusy = false;
+      }).catch(() => { this._bucketCntBusy = false; });
+    }
     if (wantTs) {
       this.qRead!.mapAsync(GPUMapMode.READ).then(() => {
         const t = new BigInt64Array(this.qRead!.getMappedRange());
