@@ -48,7 +48,16 @@ export class WasmBackend {
       C.pos[i * 3] = trs[s]; C.pos[i * 3 + 1] = trs[s + 1]; C.pos[i * 3 + 2] = trs[s + 2];
       C.rot[i * 4] = trs[s + 3]; C.rot[i * 4 + 1] = trs[s + 4]; C.rot[i * 4 + 2] = trs[s + 5]; C.rot[i * 4 + 3] = trs[s + 6];
       C.scale[i * 3] = trs[s + 7]; C.scale[i * 3 + 1] = trs[s + 8]; C.scale[i * 3 + 2] = trs[s + 9];
+      C.dirty[i] = 1;
     }
+  }
+
+  /** flag a subset of entities dirty (transform changed) without rewriting data */
+  markDirty(indices) { const D = this.#core.components.dirty; for (let k = 0; k < indices.length; k++) D[indices[k]] = 1; }
+  markAllDirty() { this.#core.markAllDirty(); }
+  nudge(indices, dz = 0.001) {
+    const P = this.#core.components.pos, D = this.#core.components.dirty;
+    for (let k = 0; k < indices.length; k++) { P[indices[k] * 3 + 2] += dz; D[indices[k]] = 1; }
   }
 
   evaluateFrame(viewProj, strategy = CullStrategy.Standard, sortByMesh = false) {
@@ -58,7 +67,10 @@ export class WasmBackend {
       visibleCount: r.visibleCount,
       visibleIds: r.visibleIds,
       visibleWorld: r.instanceWorld,
-      stats: { tested: r.stats.traversed, culledByFlags: r.stats.culledDisabled, culledByFrustum: r.stats.culledFrustum },
+      stats: {
+        tested: r.stats.traversed, culledByFlags: r.stats.culledDisabled, culledByFrustum: r.stats.culledFrustum,
+        transformsRecomputed: r.stats.transformsRecomputed, frameChanged: r.stats.frameChanged,
+      },
     };
   }
 
