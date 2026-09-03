@@ -8,6 +8,75 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-014 · GPU upload — the two costs, and moving them off the CPU
+Branch `feat/gpu-driven-cull` (off `feat/incremental-renderer`).
+`npm run bench:mesh-upload` · `npm run bench:gpu-cull`
+
+Two distinct per-frame / per-change CPU→GPU costs, each fixed independently.
+
+### 1 — geometry upload was O(all meshes) on every mesh-set change
+
+`Renderer.uploadMeshes` re-summed every vertex, re-ran a JS interleave loop
+(pos+normal+uv → stride-32) and rebuilt the whole vertex/index buffer whenever
+any mesh was added. Replaced with **three SoA vertex buffers** (the C++ decode
+already stores geometry that way → straight `writeBuffer` per attribute, no
+interleave) and an **append-only arena** (new mesh written at the tail; buffers
+double via `copyBufferToBuffer` only when the tail overflows; a mesh already in
+`slots` is skipped).
+
+`bench/run-mesh-upload.mjs`, 24 batches × 150 unique meshes, WARP:
+
+| | uploadMs, batch 1 | uploadMs, batch 24 (3600 meshes) |
+|---|--:|--:|
+| old (full rebuild) | 6.0 ms | **40.5 ms**, climbing — O(all) |
+| new (append arena) | 2.6 ms | **1.9 ms**, flat — O(new) |
+
+Digital-twin streaming (real Uberlândia data, `twin.mytheria.com.br`): CPU frame
+stays 0.8–0.9 ms through four city-region streams; each jump uploads only its
+12–22 MB delta instead of the cumulative total (which reached ~97 MB).
+
+### 2 — per-frame instance-matrix upload: `CullStrategy.Gpu`
+
+The Standard path, per moved/panned frame: frustum-cull every entity on the CPU,
+counting-sort the survivors by mesh, copy their world matrices into a render-list
+buffer, upload `visible·64 B`. `CullStrategy.Gpu` keeps only the (incremental)
+transform pass on the CPU:
+
+- C++ builds a durable per-mesh **bucket layout** (entity→bucket, cumulative
+  offsets) — rebuilt only when a `meshId` changes
+- one compute dispatch frustum-tests `worldSphere[i]` and atomically compacts
+  survivors into per-mesh runs of a `visibleIds` buffer; a second fills a
+  `DrawIndexedIndirect` args buffer
+- render: one `drawIndexedIndirect` per non-empty bucket; the VS indexes
+  `worldMats[visibleIds[instance_index]]`
+- world matrices live entity-indexed on the GPU, uploaded incrementally (only
+  `_recomputed` rows); a still camera skips the dispatch entirely
+
+`bench/run-gpu-cull.mjs` (WARP — compute time not representative; CPU + bytes are):
+
+| scene | Standard cpu | Gpu cpu | Standard upload/frame | Gpu upload/frame |
+|---|--:|--:|--:|--:|
+| camera-orbit 50k | 19–20 ms | **8 ms** | 1.7 MB | **0** |
+| camera-orbit 150k | 49–61 ms | **24 ms** | 5.1 MB | **0** |
+| static 150k | 24 ms | 23 ms | 0 | 0 |
+
+Equivalence (60k, moving camera): GPU misses **0** entities the CPU keeps;
+over-draws 0.05–0.08 % (frustum-boundary float noise — the safe direction, never
+under-draws). Static scenes on WARP pay per-frame compute-dispatch overhead
+(situational, like `Bvh`); a real GPU wouldn't. Hierarchy still works — the CPU
+transform pass runs first, only cull moved to the GPU. Not yet verified on the
+digital-twin's ~3.7k unique-mesh buckets (renders black on WARP there; needs a
+real GPU).
+
+### Not built — the design is in the code review
+
+- ring buffer for the instance-matrix buffer (removes any `writeBuffer` stall)
+- the endgame: **the transform pass itself on a compute shader**, with C++ as the
+  GPU work-planner (dirty list + indirect args in WASM) — per-frame CPU→GPU drops
+  to the camera + dirty TRS only.
+
+---
+
 ## F-013 · Incremental rendering — patch the cull + render list + GPU upload, not rebuild them
 `npm run build && npm run test:equivalence && npm run test:render:patch`
 `node --expose-gc bench/run-renderer-incremental.mjs 250000 · npm run bench:renderer:gpu`

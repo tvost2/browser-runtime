@@ -18,7 +18,7 @@
 // everything Babylon actually draws — one integration point, no
 // coupling to the demo's internal functions.
 
-import { Engine as RtEngine } from '../../vendor/browser-runtime/engine.js';
+import { Engine as RtEngine, CullStrategy } from '../../vendor/browser-runtime/engine.js';
 
 // the emscripten glue module — it locates engine.wasm next to itself
 const WASM_URL = new URL('../../vendor/browser-runtime/engine.mjs', import.meta.url).href;
@@ -40,6 +40,12 @@ export async function initRuntimeRenderer(canvas) {
     catch (e) { return { ok: false, reason: 'RtEngine.create: ' + (e?.message || e) }; }
     const scene = engine.createScene();
     scene.camera.up = [0, 1, 0];
+    // CullStrategy.Gpu (compute-shader cull, zero per-frame matrix upload) is
+    // validated in bench/run-gpu-cull.mjs but renders black here on WARP with
+    // this scene's ~3.7k unique-mesh buckets — needs a real GPU to verify, so
+    // the twin stays on the default (Auto) until then. Flip this to try it:
+    // scene.cullStrategy = CullStrategy.Gpu;
+    void CullStrategy;
     RT = {
       engine, scene, canvas,
       adapter,
@@ -80,6 +86,7 @@ export function runtimeInfo() {
     mirrorTris: RT.mirrorTris,
     geomUploadKB: (RT.engine.renderer.lastGeomUploadBytes || 0) / 1024,
     geomTotalMB: (RT.engine.renderer.geomBytesTotal || 0) / 1048576,
+    gpuUploadKB: (RT.engine.renderer.lastGpuUploadBytes || 0) / 1024,
   };
 }
 

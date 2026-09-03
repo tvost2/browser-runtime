@@ -91,6 +91,16 @@ The `espelhar` (mirror) spike of ~100 ms on a big stream is what remains —
 that's the adapter's JS mesh readback + world-matrix bake, i.e. the cost
 of copying *out of Babylon*, not the engine.
 
+### `CullStrategy.Gpu` — validated, not yet wired here
+
+The compute-shader cull path (F-014: zero per-frame matrix upload, ~2.5×
+CPU-frame on a moving camera in `bench/run-gpu-cull.mjs`) is a natural fit
+for this workload — flat entities, thousands of them, camera always
+moving. But with this scene's ~3,700 unique-mesh buckets it renders black
+on the bench box's software WebGPU (WARP); needs a real GPU to confirm.
+The adapter has the one-liner commented in — flip
+`scene.cullStrategy = CullStrategy.Gpu` and test on a phone.
+
 ### Honest limitations
 
 - **No lighting** in the runtime path — flat unlit colour per face
