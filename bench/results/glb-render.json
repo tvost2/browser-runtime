@@ -7,54 +7,114 @@
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           1
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "1/1"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9921 near=0.04 far=7"
+          "z=0.9920"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "14 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          1
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9942"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "14 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "3 vs 3"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0020"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.4224140739252464,
-          "evalMs": 0.07350331935318678,
-          "gpuMs": 0.1166,
-          "fps": 2367.3453649580993,
+          "cpuFrameMs": 0.6556347177765438,
+          "evalMs": 0.1267659934334924,
+          "gpuMs": 0.0753,
+          "fps": 1525.2395470930876,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -93,62 +153,171 @@
         "far": 7.0710678118654755,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.992056887944647
-      }
+        "ndcZMedian": 0.9919751567588204
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 62,
+          "cpuFrameMs": 0.616285136635618,
+          "evalMs": 0.11040262790582063,
+          "gpuMs": 0.0916,
+          "fps": 1622.6255357368054,
+          "visible": 1,
+          "entities": 1,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 9.5367431640625
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 1,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 3,
+          "indices": 3,
+          "textures": 0,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 800
+        },
+        "ignored": [],
+        "aabb": {
+          "min": [
+            0,
+            0,
+            0
+          ],
+          "max": [
+            1,
+            1,
+            0
+          ]
+        },
+        "near": 0.03535533905932738,
+        "far": 7.0710678118654755,
+        "onScreen": 1,
+        "visible": 1,
+        "ndcZMedian": 0.9942128088814413
+      },
+      "pixelDelta": 0.0019529411764705883
     },
     {
       "fx": "two-boxes.glb",
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           2
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "2/2"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9912 near=0.08 far=15"
+          "z=0.9912"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "16 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          2
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "2/2"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9931"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "16 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "24 vs 24"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "2 vs 2"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0021"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 60,
-          "cpuFrameMs": 0.49850612409649675,
-          "evalMs": 0.07718502097284669,
-          "gpuMs": 0.8309,
-          "fps": 2005.9934104368758,
+          "frame": 62,
+          "cpuFrameMs": 0.41397295486284275,
+          "evalMs": 0.07405435307125623,
+          "gpuMs": 0.6492,
+          "fps": 2415.6167407876183,
           "visible": 2,
           "entities": 2,
           "batches": 1,
@@ -187,62 +356,171 @@
         "far": 15.461646096066225,
         "onScreen": 2,
         "visible": 2,
-        "ndcZMedian": 0.9911921454481984
-      }
+        "ndcZMedian": 0.9911969833358892
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 62,
+          "cpuFrameMs": 0.49304276112176887,
+          "evalMs": 0.0883187710265225,
+          "gpuMs": 0.5759,
+          "fps": 2028.2216449640273,
+          "visible": 2,
+          "entities": 2,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 9.5367431640625
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 2,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 24,
+          "indices": 36,
+          "textures": 0,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 1996
+        },
+        "ignored": [],
+        "aabb": {
+          "min": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "max": [
+            2.25,
+            0.5,
+            0.5
+          ]
+        },
+        "near": 0.07730823048033114,
+        "far": 15.461646096066225,
+        "onScreen": 2,
+        "visible": 2,
+        "ndcZMedian": 0.9930856688429446
+      },
+      "pixelDelta": 0.0021470588235294116
     },
     {
       "fx": "real/Box.glb",
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           1
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "1/1"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9889 near=0.04 far=9"
+          "z=0.9928"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "16 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          1
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9889"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "16 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "24 vs 24"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0013"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 60,
-          "cpuFrameMs": 0.4159806362300549,
-          "evalMs": 0.07123677205127422,
-          "gpuMs": 1.4926,
-          "fps": 2403.958052141056,
+          "frame": 62,
+          "cpuFrameMs": 0.4675154254347387,
+          "evalMs": 0.08381211503094174,
+          "gpuMs": 1.1596,
+          "fps": 2138.9668566980617,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -281,62 +559,171 @@
         "far": 8.660255414354749,
         "onScreen": 1,
         "visible": 1,
+        "ndcZMedian": 0.992837389266046
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 62,
+          "cpuFrameMs": 0.4707596788076869,
+          "evalMs": 0.09399709083128563,
+          "gpuMs": 0.9972,
+          "fps": 2124.226107326657,
+          "visible": 1,
+          "entities": 2,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 9.5367431640625
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 2,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 24,
+          "indices": 36,
+          "textures": 0,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 1664
+        },
+        "ignored": [],
+        "aabb": {
+          "min": [
+            -0.5,
+            -0.5000001192092896,
+            -0.5000001192092896
+          ],
+          "max": [
+            0.5,
+            0.5000001192092896,
+            0.5000001192092896
+          ]
+        },
+        "near": 0.04330127707177375,
+        "far": 8.660255414354749,
+        "onScreen": 1,
+        "visible": 1,
         "ndcZMedian": 0.9888940725407448
-      }
+      },
+      "pixelDelta": 0.001303848946986202
     },
     {
       "fx": "real/BoxTextured.glb",
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           1
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "1/1"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9889 near=0.04 far=9"
+          "z=0.9928"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "46 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          1
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9889"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "46 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "24 vs 24"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0021"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
           "frame": 63,
-          "cpuFrameMs": 0.4229314444537409,
-          "evalMs": 0.06957157074867985,
-          "gpuMs": 2.9899,
-          "fps": 2364.4493998113617,
+          "cpuFrameMs": 0.49686422168924294,
+          "evalMs": 0.09275264005573844,
+          "gpuMs": 2.9157,
+          "fps": 2012.622274552577,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -375,62 +762,171 @@
         "far": 8.660255414354749,
         "onScreen": 1,
         "visible": 1,
+        "ndcZMedian": 0.992837389266046
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 63,
+          "cpuFrameMs": 0.5609316314108221,
+          "evalMs": 0.10717271812163237,
+          "gpuMs": 2.0483,
+          "fps": 1782.7484563223134,
+          "visible": 1,
+          "entities": 2,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 9.5367431640625
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 2,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 24,
+          "indices": 36,
+          "textures": 1,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 5956
+        },
+        "ignored": [],
+        "aabb": {
+          "min": [
+            -0.5,
+            -0.5000001192092896,
+            -0.5000001192092896
+          ],
+          "max": [
+            0.5,
+            0.5000001192092896,
+            0.5000001192092896
+          ]
+        },
+        "near": 0.04330127707177375,
+        "far": 8.660255414354749,
+        "onScreen": 1,
+        "visible": 1,
         "ndcZMedian": 0.9888940725407448
-      }
+      },
+      "pixelDelta": 0.0020970225127087874
     },
     {
       "fx": "real/DamagedHelmet.glb",
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           1
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "1/1"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9886 near=0.08 far=16"
+          "z=0.9886"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "94 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          1
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9886"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "92 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "14556 vs 14556"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0106"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 61,
-          "cpuFrameMs": 1.3338826545751958,
-          "evalMs": 0.071278310188466,
-          "gpuMs": 7.5063,
-          "fps": 749.6911340514222,
+          "frame": 58,
+          "cpuFrameMs": 13.782368122615823,
+          "evalMs": 0.21957010575741248,
+          "gpuMs": 11.2822,
+          "fps": 72.5564715079026,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -473,62 +969,175 @@
         "far": 16.446140696949662,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9886486160117869
-      }
+        "ndcZMedian": 0.9886431497359776
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 72,
+          "cpuFrameMs": 1.5317079173711554,
+          "evalMs": 0.09129123571128907,
+          "gpuMs": 18.0539,
+          "fps": 652.8659861707075,
+          "visible": 1,
+          "entities": 1,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 179.290771484375
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 1,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 14556,
+          "indices": 46356,
+          "textures": 5,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 3773916
+        },
+        "ignored": [
+          "material 0: metallicRoughnessTexture (Phase 5)",
+          "material 0: normalTexture (Phase 5)",
+          "material 0: occlusionTexture (Phase 5)"
+        ],
+        "aabb": {
+          "min": [
+            -0.9474585652351379,
+            -0.9009741203569206,
+            -1.1871552572404056
+          ],
+          "max": [
+            0.9424954056739807,
+            0.9009952054202515,
+            0.8128453151989063
+          ]
+        },
+        "near": 0.08223070348474831,
+        "far": 16.446140696949662,
+        "onScreen": 1,
+        "visible": 1,
+        "ndcZMedian": 0.9886054477354945
+      },
+      "pixelDelta": 0.010642992011619463
     },
     {
       "fx": "real/Duck.glb",
       "pass": true,
       "checks": [
         [
-          "geometry path = wasm",
+          "A-wasm: geometry path = wasm",
           true,
           "wasm"
         ],
         [
-          "visible > 0",
+          "A-wasm: visible > 0",
           true,
           1
         ],
         [
-          "most instances on screen",
+          "A-wasm: most instances on screen",
           true,
           "1/1"
         ],
         [
-          "draw calls ≥ 1, ≤ primitives",
+          "A-wasm: draw calls 1..prims",
           true,
-          "1 calls / 1 prims"
+          "1/1"
         ],
         [
-          "depth headroom (median z < 0.9997)",
+          "A-wasm: depth headroom",
           true,
-          "z=0.9905 near=0.25 far=50"
+          "z=0.9904"
         ],
         [
-          "not a black screen (frame PNG > 9 KB; black ≈ 4 KB)",
+          "A-wasm: not black (PNG > 9 KB)",
           true,
           "20 KB"
         ],
         [
-          "no GPU validation errors",
+          "A-wasm: no GPU errors",
           true,
           "clean"
         ],
         [
-          "no page errors",
+          "A-wasm: no page errors",
           true,
           "clean"
+        ],
+        [
+          "B-native: geometry path = native",
+          true,
+          "native"
+        ],
+        [
+          "B-native: visible > 0",
+          true,
+          1
+        ],
+        [
+          "B-native: most instances on screen",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: draw calls 1..prims",
+          true,
+          "1/1"
+        ],
+        [
+          "B-native: depth headroom",
+          true,
+          "z=0.9904"
+        ],
+        [
+          "B-native: not black (PNG > 9 KB)",
+          true,
+          "20 KB"
+        ],
+        [
+          "B-native: no GPU errors",
+          true,
+          "clean"
+        ],
+        [
+          "B-native: no page errors",
+          true,
+          "clean"
+        ],
+        [
+          "A/B: same vertex count",
+          true,
+          "2399 vs 2399"
+        ],
+        [
+          "A/B: same draw calls",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: same visible count",
+          true,
+          "1 vs 1"
+        ],
+        [
+          "A/B: screenshots match (mean channel Δ < 0.03)",
+          true,
+          "Δ=0.0022"
         ]
       ],
-      "stats": {
+      "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 61,
-          "cpuFrameMs": 0.39712792214440384,
-          "evalMs": 0.07138225822553554,
-          "gpuMs": 3.319,
-          "fps": 2518.08030671885,
+          "frame": 63,
+          "cpuFrameMs": 0.4129781960409574,
+          "evalMs": 0.073438033446792,
+          "gpuMs": 3.9603,
+          "fps": 2421.4353435279772,
           "visible": 1,
           "entities": 3,
           "batches": 1,
@@ -569,8 +1178,59 @@
         "far": 50.47014530916104,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9904909497004949
-      }
+        "ndcZMedian": 0.9904434514860271
+      },
+      "b": {
+        "gpuErr": null,
+        "stats": {
+          "frame": 63,
+          "cpuFrameMs": 0.525694363931373,
+          "evalMs": 0.09796147796241046,
+          "gpuMs": 4.4035,
+          "fps": 1902.245998076832,
+          "visible": 1,
+          "entities": 3,
+          "batches": 1,
+          "drawCalls": 1,
+          "wasmHeapMB": 64,
+          "jsHeapMB": 9.5367431640625
+        },
+        "drawCalls": 1,
+        "assetStats": {
+          "nodes": 3,
+          "meshes": 1,
+          "primitives": 1,
+          "vertices": 2399,
+          "indices": 12636,
+          "textures": 1,
+          "zeroCopyAccessors": 0,
+          "copiedAccessors": 0,
+          "geometryPath": "native",
+          "wasmCrossings": 5,
+          "bytesUploadedToWasm": 120484
+        },
+        "ignored": [
+          "1 camera(s) (Phase 3 owns cameras)"
+        ],
+        "aabb": {
+          "min": [
+            -0.6929849851209298,
+            0.09929369704513924,
+            -4.928941379309637
+          ],
+          "max": [
+            4.9261148587280275,
+            6.45649443373671,
+            0.5392519639599627
+          ]
+        },
+        "near": 0.2523507265458052,
+        "far": 50.47014530916104,
+        "onScreen": 1,
+        "visible": 1,
+        "ndcZMedian": 0.9903903554881689
+      },
+      "pixelDelta": 0.002216485112563544
     }
   ]
 }
