@@ -38,11 +38,13 @@ async function run(params) {
   await page.goto(`http://localhost:${port}/web/harness/chunk-merge.html?${q}`);
   await page.waitForFunction(() => window.__ready, { timeout: 40000 });
   const check = await page.evaluate(() => window.__bench.check());
+  await page.waitForTimeout(500); // one settled frame for the pick pass to read
+  const pick = await page.evaluate(() => window.__bench.pick());
   await page.evaluate(() => { window.__bench.reset(); window.__scenario = "camera"; });
   await page.waitForTimeout(4000);
   const r = await page.evaluate(() => window.__bench.result());
   await page.close();
-  return { ...r, check, errs: errs.slice(0, 2) };
+  return { ...r, check, pick, errs: errs.slice(0, 2) };
 }
 
 const COUNT = 4000;
@@ -69,11 +71,14 @@ console.log(`\n  merge kernel: ${merged.mergeMs.toFixed(1)} ms  ·  ${merged.buc
 
 const c = merged.check;
 const cok = c.ok && merged.check.aabbOk;
-console.log(`\n  correctness: vertices ${c.vSum}/${c.srcVerts}  indices ${c.iSum}/${c.srcI}  ` +
+console.log(`\n  geometry: vertices ${c.vSum}/${c.srcVerts}  indices ${c.iSum}/${c.srcI}  ` +
   `ids in [${c.idMin}..${c.idMax}] of ${COUNT}  world-AABB match ${c.aabbOk}  →  ${cok ? "OK" : "FAIL"}`);
+
+const p = merged.pick;
+console.log(`  pick buffer: ${p.hit}/${p.tried} centroids resolved to a building, ${p.exact} exact  →  ${p.ok ? "OK" : "FAIL"}`);
 
 const collapse = noMerge.drawBuckets / Math.max(1, merged.drawBuckets);
 console.log(`\n  draw buckets ${noMerge.drawBuckets} → ${merged.drawBuckets}  (${collapse.toFixed(0)}× fewer)`);
 
 const anyErr = [noMerge, merged, mergedGpu].some((r) => r.errs.length);
-if (!cok || anyErr) process.exitCode = 1;
+if (!cok || !p.ok || anyErr) process.exitCode = 1;

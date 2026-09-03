@@ -128,6 +128,12 @@ export class Engine {
     return this.stats;
   }
 
+  /** Pixel-accurate pick at canvas coordinates (x, y). Returns the per-vertex
+   *  id under that pixel — for a mesh from `mergeMeshes` that is the source
+   *  object id — or -1 for empty space / a mesh with no pick ids. Call after a
+   *  frame rendered with a non-`Gpu` `CullStrategy`. */
+  pickAt(x: number, y: number): Promise<number> { return this.renderer.pickAt(x, y); }
+
   start() {
     if (this.running) return;
     this.running = true;

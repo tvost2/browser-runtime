@@ -8,6 +8,10 @@ export interface MeshData {
   indices: Uint32Array;
   normals?: Float32Array;       // xyz — renderer flat-shades if absent
   uv0?: Float32Array | null;    // uv
+  /** per-vertex pick id (u32). Set on meshes produced by `mergeMeshes` so the
+   *  individual source object stays selectable after a merge; `pickAt()` reads
+   *  it back. Absent → the mesh is not individually pickable (id 0xffffffff). */
+  vertexId?: Uint32Array | null;
 }
 
 /** A scene = one WASM `World` + a mesh registry + a camera. Entities are dense

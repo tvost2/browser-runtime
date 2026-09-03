@@ -91,7 +91,7 @@ export async function mergeMeshes(sources: MergeSource[], wasmUrl?: string): Pro
   const vertexId = new Uint32Array(mod.HEAPU32.buffer, M.outIdPtr(), vCount).slice();
 
   return {
-    mesh: { positions, indices, normals, uv0 },
+    mesh: { positions, indices, normals, uv0, vertexId },
     vertexId,
     vertexCount: vCount,
     indexCount: iCount,

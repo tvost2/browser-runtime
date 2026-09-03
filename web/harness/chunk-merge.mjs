@@ -143,6 +143,31 @@ window.__bench = {
       wasmHeapMB: engine.stats.wasmHeapMB,
     };
   },
+  // pick correctness: project each source centroid to screen, pick there, and
+  // check the id-buffer resolves to a real building (exact when unoccluded).
+  async pick() {
+    if (!MERGE) return { ok: true, note: "baseline (meshes carry no pick id)" };
+    const W = canvas.width, H = canvas.height;
+    const vp = scene.camera.viewProj(W / H);
+    const project = (x, y, z) => {
+      const cx = x * vp[0] + y * vp[4] + z * vp[8] + vp[12];
+      const cy = x * vp[1] + y * vp[5] + z * vp[9] + vp[13];
+      const cw = x * vp[3] + y * vp[7] + z * vp[11] + vp[15];
+      if (cw <= 0) return null;
+      return [(cx / cw * 0.5 + 0.5) * W, (1 - (cy / cw * 0.5 + 0.5)) * H];
+    };
+    let tried = 0, hit = 0, exact = 0;
+    const step = Math.max(1, (COUNT / 80) | 0);
+    for (let k = 0; k < COUNT && tried < 80; k += step) {
+      const sp = project(centers[k * 3], centers[k * 3 + 1], centers[k * 3 + 2]);
+      if (!sp || sp[0] < 2 || sp[0] >= W - 2 || sp[1] < 2 || sp[1] >= H - 2) continue;
+      tried++;
+      const id = await engine.pickAt(sp[0], sp[1]);
+      if (id >= 0 && id < COUNT) hit++;
+      if (id === k) exact++;
+    }
+    return { ok: tried > 10 && hit / tried > 0.75 && exact / tried > 0.35, tried, hit, exact };
+  },
   // correctness: merged geometry conserves triangle count + world AABB, and
   // every merged vertex id maps back to a real source item.
   check() {

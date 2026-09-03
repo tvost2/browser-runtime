@@ -55,6 +55,25 @@ struct VSOut {
   return vec4<f32>(base.rgb * lit, base.a);
 }`;
 
+// --- pick pass --------------------------------------------------------------
+// Re-draws the current render list writing each fragment's per-vertex id into
+// an r32uint target; `pickAt(x,y)` copies back one texel. Lets individual
+// objects stay selectable after `mergeMeshes` has fused them into one draw.
+const PICK_WGSL = /* wgsl */ `
+struct Camera { viewProj : mat4x4<f32> };
+@group(0) @binding(0) var<uniform> camera : Camera;
+@group(0) @binding(1) var<storage, read> models : array<mat4x4<f32>>;
+
+struct VSOut { @builtin(position) clip : vec4<f32>, @location(0) @interpolate(flat) id : u32 };
+
+@vertex fn vs(@location(0) p : vec3<f32>, @location(3) vid : u32, @builtin(instance_index) i : u32) -> VSOut {
+  var o : VSOut;
+  o.clip = camera.viewProj * (models[i] * vec4<f32>(p, 1.0));
+  o.id = vid;
+  return o;
+}
+@fragment fn fs(in : VSOut) -> @location(0) u32 { return in.id; }`;
+
 // --- GPU-driven path (CullStrategy.Gpu) ---------------------------------------
 // One compute dispatch culls every entity against the frustum and atomically
 // compacts the survivors into per-mesh runs of a `visibleIds` buffer; a second
@@ -262,6 +281,8 @@ export interface MaterialSpec {
 const POS_STRIDE = 12; // vec3 f32
 const NRM_STRIDE = 12;
 const UV_STRIDE = 8;
+const ID_STRIDE = 4;   // u32 per-vertex pick id
+const NO_PICK = 0xffffffff;
 
 export class Renderer {
   device!: GPUDevice;
@@ -284,6 +305,7 @@ export class Renderer {
   private posBuf!: GPUBuffer;
   private nrmBuf!: GPUBuffer;
   private uvBuf!: GPUBuffer;
+  private idBuf!: GPUBuffer;   // per-vertex pick id (u32), parallel to posBuf
   private ibuf!: GPUBuffer;
   private vertHead = 0;   // next free vertex slot
   private idxHead = 0;    // next free index slot
@@ -309,6 +331,18 @@ export class Renderer {
   private qset?: GPUQuerySet;
   private qResolve?: GPUBuffer;
   private qRead?: GPUBuffer;
+  private _defaultId = new Uint32Array(0); // NO_PICK filler for meshes with no per-vertex id
+
+  // --- pick buffer (CPU render path) ---
+  // A one-off pass re-draws the current render list writing each fragment's
+  // per-vertex id into an r32uint target; pickAt(x,y) reads back one texel.
+  private pickPipeline?: GPURenderPipeline;
+  private pickPipelineNoCull?: GPURenderPipeline;
+  private pickTex?: GPUTexture;
+  private pickDepth?: GPUTexture;
+  private pickRead?: GPUBuffer;   // 256 B (one aligned row) MAP_READ mirror
+  private _lastFrame?: FrameResult;
+  private _lastVP = new Float32Array(16);
 
   // --- GPU-driven cull path ---
   private computeXform?: GPUComputePipeline;
@@ -412,7 +446,27 @@ export class Renderer {
     this.defaultTex = d.createTexture({ size: [1, 1], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     d.queue.writeTexture({ texture: this.defaultTex }, new Uint8Array([255, 255, 255, 255]), { bytesPerRow: 4, rowsPerImage: 1 }, [1, 1]);
     this.registerMaterial(0, { baseColorFactor: [1, 1, 1, 1] }); // default
+    this.buildPickPipeline();
     this.buildComputePipelines();
+  }
+
+  private buildPickPipeline() {
+    const d = this.device;
+    const mod = d.createShaderModule({ code: PICK_WGSL });
+    const pcommon = {
+      layout: d.createPipelineLayout({ bindGroupLayouts: [this.g0Layout] }),
+      vertex: {
+        module: mod, entryPoint: "vs",
+        buffers: [
+          { arrayStride: POS_STRIDE, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as const }] },
+          { arrayStride: ID_STRIDE, attributes: [{ shaderLocation: 3, offset: 0, format: "uint32" as const }] },
+        ],
+      },
+      fragment: { module: mod, entryPoint: "fs", targets: [{ format: "r32uint" as const }] },
+      depthStencil: { format: "depth24plus" as const, depthWriteEnabled: true, depthCompare: "less" as const },
+    };
+    this.pickPipeline = d.createRenderPipeline({ ...pcommon, primitive: { topology: "triangle-list", cullMode: "back", frontFace: "ccw" } });
+    this.pickPipelineNoCull = d.createRenderPipeline({ ...pcommon, primitive: { topology: "triangle-list", cullMode: "none", frontFace: "ccw" } });
   }
 
   private buildComputePipelines() {
@@ -497,11 +551,12 @@ export class Renderer {
   }
 
   dispose() {
-    for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead,
+    for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.idBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead, this.pickRead,
       this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gFrameU,
       this.gLPos, this.gLRot, this.gLScl, this.gParent, this.gLMin, this.gLMax, this._bucketCntRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
+    this.pickTex?.destroy(); this.pickDepth?.destroy();
     this.device.destroy();
   }
 
@@ -564,27 +619,32 @@ export class Renderer {
     if (this.idxHead + newI > this.idxCap) this.growIndices(this.idxHead + newI);
 
     const d = this.device;
-    // reusable (0,1,0) filler for meshes without normals
+    // reusable fillers: (0,1,0) normal / NO_PICK id for meshes lacking them
     let maxN = 0;
-    for (const [, m] of fresh) if (!m.normals) maxN = Math.max(maxN, m.positions.length);
+    for (const [, m] of fresh) if (!m.normals || !m.vertexId) maxN = Math.max(maxN, m.positions.length);
     if (maxN > this._defaultNrm.length) {
       this._defaultNrm = new Float32Array(maxN);
       for (let i = 1; i < maxN; i += 3) this._defaultNrm[i] = 1;
     }
+    const maxV = maxN / 3;
+    if (maxV > this._defaultId.length) { this._defaultId = new Uint32Array(maxV); this._defaultId.fill(NO_PICK); }
 
     for (const [id, m] of fresh) {
       const n = m.positions.length / 3;
       const uv = (m as MeshData & { uv0?: Float32Array | null }).uv0 ?? null;
+      const vid = m.vertexId ?? null;
       const vByte = this.vertHead * POS_STRIDE;
 
       d.queue.writeBuffer(this.posBuf, vByte, m.positions.buffer, m.positions.byteOffset, n * 12);
       if (m.normals) d.queue.writeBuffer(this.nrmBuf, vByte, m.normals.buffer, m.normals.byteOffset, n * 12);
       else d.queue.writeBuffer(this.nrmBuf, vByte, this._defaultNrm.buffer, 0, n * 12);
       if (uv && uv.length >= n * 2) d.queue.writeBuffer(this.uvBuf, this.vertHead * UV_STRIDE, uv.buffer, uv.byteOffset, n * 8);
+      if (vid && vid.length >= n) d.queue.writeBuffer(this.idBuf, this.vertHead * ID_STRIDE, vid.buffer, vid.byteOffset, n * 4);
+      else d.queue.writeBuffer(this.idBuf, this.vertHead * ID_STRIDE, this._defaultId.buffer, 0, n * 4);
       d.queue.writeBuffer(this.ibuf, this.idxHead * 4, m.indices.buffer, m.indices.byteOffset, m.indices.length * 4);
 
       this.slots.set(id, { firstIndex: this.idxHead, indexCount: m.indices.length, baseVertex: this.vertHead });
-      const b = n * 12 + n * 12 + (uv ? n * 8 : 0) + m.indices.length * 4;
+      const b = n * 12 + n * 12 + (uv ? n * 8 : 0) + n * 4 + m.indices.length * 4;
       this.lastGeomUploadBytes += b;
       this.vertHead += n;
       this.idxHead += m.indices.length;
@@ -596,17 +656,21 @@ export class Renderer {
   private growVerts(need: number) {
     const d = this.device;
     const cap = Math.max(need, this.vertCap * 2, 65536);
-    const mk = () => d.createBuffer({ size: cap * 12, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
-    const np = mk(), nn = mk(), nu = d.createBuffer({ size: cap * UV_STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    const V = GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+    const mk = () => d.createBuffer({ size: cap * 12, usage: V });
+    const np = mk(), nn = mk();
+    const nu = d.createBuffer({ size: cap * UV_STRIDE, usage: V });
+    const nid = d.createBuffer({ size: cap * ID_STRIDE, usage: V });
     if (this.vertHead > 0) {
       const enc = d.createCommandEncoder();
       enc.copyBufferToBuffer(this.posBuf, 0, np, 0, this.vertHead * 12);
       enc.copyBufferToBuffer(this.nrmBuf, 0, nn, 0, this.vertHead * 12);
       enc.copyBufferToBuffer(this.uvBuf, 0, nu, 0, this.vertHead * UV_STRIDE);
+      enc.copyBufferToBuffer(this.idBuf, 0, nid, 0, this.vertHead * ID_STRIDE);
       d.queue.submit([enc.finish()]);
     }
-    this.posBuf?.destroy(); this.nrmBuf?.destroy(); this.uvBuf?.destroy();
-    this.posBuf = np; this.nrmBuf = nn; this.uvBuf = nu;
+    this.posBuf?.destroy(); this.nrmBuf?.destroy(); this.uvBuf?.destroy(); this.idBuf?.destroy();
+    this.posBuf = np; this.nrmBuf = nn; this.uvBuf = nu; this.idBuf = nid;
     this.vertCap = cap;
   }
 
@@ -655,6 +719,8 @@ export class Renderer {
     d.queue.writeBuffer(this.camBuf, 0, viewProj);
     this.ensureModelBuffer(Math.max(1, frame.visibleCount));
     this.lastUploadBytes = 0;
+    this._lastFrame = frame;           // for pickAt() — re-draws this list into an id target
+    this._lastVP.set(viewProj);
 
     // Instance storage buffer sync:
     //  · frameChanged === 0        → nothing changed, buffer is already correct.
@@ -739,6 +805,60 @@ export class Renderer {
         this.qRead!.unmap();
       }).catch(() => {});
     }
+  }
+
+  /** Pixel-accurate pick. Re-draws the most recent `render()` list into an
+   *  r32uint target and reads back the per-vertex id at (x, y) in canvas
+   *  pixels. Returns the id, or -1 for empty space / a non-pickable surface.
+   *
+   *  Uses the CPU render path's instance buffer — call after a `render()` with
+   *  a non-`Gpu` `CullStrategy` (which is the pairing for merged scenes anyway).
+   *  `mergeMeshes` stamps every vertex with its source id, so a merged cell
+   *  still resolves the individual building. */
+  async pickAt(x: number, y: number): Promise<number> {
+    const d = this.device;
+    const f = this._lastFrame;
+    if (!f || !this.posBuf || !this.idBuf || !this.pickPipeline) return -1;
+    const W = Math.max(1, this.canvas.width | 0), H = Math.max(1, this.canvas.height | 0);
+    x = Math.min(W - 1, Math.max(0, x | 0));
+    y = Math.min(H - 1, Math.max(0, y | 0));
+
+    if (!this.pickTex || this.pickTex.width !== W || this.pickTex.height !== H) {
+      this.pickTex?.destroy(); this.pickDepth?.destroy();
+      this.pickTex = d.createTexture({ size: [W, H], format: "r32uint", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+      this.pickDepth = d.createTexture({ size: [W, H], format: "depth24plus", usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    }
+    if (!this.pickRead) this.pickRead = d.createBuffer({ size: 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    if (this.pickRead.mapState !== "unmapped") return -1; // a pick is already in flight
+
+    d.queue.writeBuffer(this.camBuf, 0, this._lastVP);
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{ view: this.pickTex.createView(), clearValue: { r: NO_PICK, g: 0, b: 0, a: 0 }, loadOp: "clear", storeOp: "store" }],
+      depthStencilAttachment: { view: this.pickDepth!.createView(), depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "store" },
+    });
+    pass.setBindGroup(0, this.g0);
+    pass.setVertexBuffer(0, this.posBuf);
+    pass.setVertexBuffer(1, this.idBuf);
+    pass.setIndexBuffer(this.ibuf, "uint32");
+    let curPipe: GPURenderPipeline | null = null;
+    for (const b of f.batches) {
+      const s = this.slots.get(b.meshId);
+      if (!s) continue;
+      const matId = this.meshMaterial.get(b.meshId) ?? 0;
+      const m = this.materials.get(matId) ?? this.materials.get(0)!;
+      const pipe = m.doubleSided ? this.pickPipelineNoCull! : this.pickPipeline!;
+      if (pipe !== curPipe) { pass.setPipeline(pipe); curPipe = pipe; }
+      pass.drawIndexed(s.indexCount, b.instanceCount, s.firstIndex, s.baseVertex, b.firstInstance);
+    }
+    pass.end();
+    enc.copyTextureToBuffer({ texture: this.pickTex, origin: { x, y } }, { buffer: this.pickRead, bytesPerRow: 256 }, { width: 1, height: 1 });
+    d.queue.submit([enc.finish()]);
+
+    await this.pickRead.mapAsync(GPUMapMode.READ);
+    const v = new Uint32Array(this.pickRead.getMappedRange())[0];
+    this.pickRead.unmap();
+    return v === NO_PICK ? -1 : v;
   }
 
   // ---- GPU-driven cull path -------------------------------------------------
