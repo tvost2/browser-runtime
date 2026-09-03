@@ -1,17 +1,21 @@
 # Investigation: GLB / glTF loader
 
-**Branch:** `feat/glb-loader` (off `develop`). **Status:**
+Two cycles:
 
-| step | state |
-|---|---|
-| PROFILE | ✅ [FINDINGS F-010](../FINDINGS.md#f-010) · `npm run glb:profile` |
-| DESIGN | ✅ decisions below |
-| IMPLEMENT (JS loader) | ✅ `web/asset/` — `glb.ts` (container) · `gltf.ts` (decode → `Asset`) · `Asset.ts` · `AssetManager.ts` · `scene.loadAsset(url)` |
-| IMPLEMENT (C++/WASM core) | ✅ `native/include/bcpp/gltf.hpp` (`bcpp::gltf::Batch`) · `native/bindings/asset.cpp` (`GltfBatch`) · `web/asset/wasm.ts` (JS batch API) · hybrid `"auto"` dispatch in `gltf.ts` |
-| VALIDATE (equivalence) | ✅ `npm run test:glb` — **89/89**: WASM vs JS reference byte-for-byte + exact known values + `@babylonjs/loaders` cross-check |
-| VALIDATE (render) | ✅ `npm run test:glb:render` — **6/6** fixtures through the forced WASM path to the pixels, screenshots visually verified |
-| BENCHMARK | ✅ `npm run bench:glb` — JS vs WASM vs `auto` vs WASM+tangents, all fixtures |
-| DECIDE | ✅ [Conclusion](#conclusion) |
+- **Cycle 1** (`feat/glb-loader`, merged) — the JS loader + the `bcpp::gltf::Batch`
+  geometry core + hybrid per-primitive dispatch. [FINDINGS F-010](../FINDINGS.md#f-010).
+- **Cycle 2** (`feat/glb-native-pipeline`) — the *whole* decode (container, JSON,
+  metadata, accessors, geometry) also implemented in C++/WASM as `parser: "native"`,
+  and both pipelines benchmarked end to end. [FINDINGS F-011](../FINDINGS.md#f-011).
+  Summary: [Cycle 2 conclusion](#cycle-2--full-native-pipeline).
+
+| step | cycle 1 | cycle 2 |
+|---|---|---|
+| IMPLEMENT | `web/asset/{glb,gltf}.ts` + `bcpp::gltf::Batch` + `web/asset/wasm.ts` + hybrid `geometry:"auto"` | `bcpp::gltf::{parseContainer, parseMetadata}` (yyjson) + `bcpp::gltf::Pipeline` + `web/asset/native.ts` + `parser:"native"` |
+| VALIDATE | `npm run test:glb` — **89/89** (WASM geometry vs JS + Babylon) | `npm run test:glb:native` — **114/114** (native vs JS: container/metadata/geometry/scene/asset) |
+| RENDER | `npm run test:glb:render` — 6/6 forced-WASM to pixels | same test, now A **and** B per fixture — 6/6 + render equivalence |
+| BENCHMARK | `npm run bench:glb` (JS vs WASM vs auto geometry) | `npm run bench:glb:pipelines` + `bench:glb:gpu` (A vs B, all stages) |
+| DECIDE | [Cycle 1 conclusion](#conclusion) — hybrid dispatch | [Cycle 2 conclusion](#cycle-2--full-native-pipeline) — route by workload |
 
 ## Decisions
 
@@ -307,3 +311,77 @@ mergeable to `develop`.
 - KHR_mesh_quantization / KHR_draco_mesh_compression not decoded — quantised
   attributes that *are* plain accessors (normalized ints) already route to WASM
   and decode correctly; Draco/meshopt need their own cycle.
+
+## Cycle 2 — full native pipeline
+
+`parser: "native"` (`web/asset/native.ts` → `bcpp::gltf::Pipeline`) does the
+entire `GLB bytes → Asset` decode in C++/WASM: container split
+(`parseContainer`), JSON parse (vendored **yyjson**, `native/vendor/`, read-only),
+glTF metadata (`parseMetadata` → a flat data-oriented `Document` + packed string
+blob), nodes topological + matrix→TRS, accessor→PrimDesc, geometry via the same
+`bcpp::gltf::Batch` (not a second system). JS reads back **one TOC** int32 array
+and slices typed-array views out of WASM memory. **5 JS↔WASM crossings per
+asset** (the hybrid is 9; pure JS is 0). BIN-embedded image bytes are returned
+as zero-copy views over the caller's ArrayBuffer.
+
+### What runs where (cycle 2, `parser:"native"`)
+
+| in C++/WASM | stays in JS |
+|---|---|
+| GLB header / magic / chunk walk | fetch, the `decodeGLB` entry point |
+| JSON parse (yyjson) | reading the TOC, slicing views, assembling the `Asset` object |
+| glTF metadata: buffers, bufferViews, accessors, meshes, primitives, materials, textures, samplers, images | `AssetManager` → Scene entities + GPU upload |
+| nodes: topological order, matrix→TRS decompose, parent index | image decode (`createImageBitmap`) + texture upload |
+| accessor decode, index widening, non-indexed expansion | — |
+| normal / tangent generation, AABB, SoA layout | — |
+| base64 decode of data-URI buffers/images | — |
+
+### Result (see [FINDINGS F-011](../FINDINGS.md#f-011) for the numbers)
+
+- **114/114** data equivalence (container, all metadata, geometry, scene, asset,
+  ignored features) + **6/6** render equivalence (screenshots match, mean channel
+  Δ < 0.011).
+- The C++ front-end (container + JSON + metadata) costs **~0.1 ms, flat** — a
+  3.6 MB GLB and an 0.8 KB GLB parse their JSON in the same 0.04 ms. There is no
+  penalty to routing structural parsing through C++.
+- **B beats the hybrid on geometry-heavy real content** — the vitrine corpus
+  (~1 M-vertex meshes, no source normals) decodes **18–30 % faster** through the
+  full native pipeline (5 crossings vs 9, metadata + dispatch in C++, geometry
+  read zero-copy from the blob). Duck likewise 1.27×.
+- **B loses on tiny assets** (fixed overhead, ~50 µs — irrelevant) and on
+  **texture-heavy already-GPU-ready assets** (`DamagedHelmet` 0.64×): C++ owning
+  the container parse forces the whole blob — textures included — into linear
+  memory, where the JS front-end reads packed-F32 as zero-copy views.
+- **GPU level: the decode pipeline is invisible.** Every fixture is upload-bound;
+  `createImageBitmap` dwarfs GLB decode 10–100× (`DamagedHelmet` ~1050 ms vs
+  ~3 ms). A CPU-side decode win is not an FPS win (F-008 again).
+- SIMD: `-O3` vs `-O3 -msimd128` ≈ 1.0× for JSON/metadata and for the
+  scatter-heavy normal-generation kernel; stays on as the shipping profile.
+
+### DECIDE — route by workload
+
+Both pipelines are real, validated, and rendered. Neither dominates. Because the
+C++ front-end is nearly free, the boundary can sit where the geometry workload
+wants it:
+
+- `parser: "native"` — geometry-heavy / needs-work assets (vitrine-class real
+  content): one coherent C++ path, fewest crossings, fastest.
+- default (cycle-1 JS front-end + `geometry:"auto"`) — mixed / small /
+  texture-heavy-GPU-ready.
+- a future `parser: "auto"` could pick per asset from a cheap JSON peek.
+
+The native `Document` + `Pipeline` are also reusable as a standalone C++ glTF
+core outside the loader (an engine-side asset system, a CLI, a worker) — the JS
+side is a thin ~250-line adapter over the TOC.
+
+### Cycle 2 limitations
+
+- Sparse accessors and `COLOR_0` primitives are not handled natively — `parser:
+  "native"` falls back to the JS front-end for those (no fixture hits it).
+- The parse-time blob copy includes texture bytes; only removable by moving the
+  container walk to JS (rejected — Part 1 wants the GLB parser in C++) or a
+  partial-upload scheme (not built).
+- yyjson is vendored (~665 KB of source, `-DYYJSON_DISABLE_WRITER=1`); adds
+  ~40 KB to `engine.wasm`.
+- Multi-buffer `.gltf` with external `.bin`: the combined-bin path unions
+  referenced ranges, correct but untested (all fixtures are single-buffer GLB).

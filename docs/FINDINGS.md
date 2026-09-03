@@ -8,6 +8,141 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-011 · Full C++/WASM GLB pipeline — the front-end is ~free in C++, geometry work is where B wins
+`npm run build && npm run build:wasm:nosimd`
+`npm run test:glb:native && npm run test:glb:render`
+`GLB_VITRINE_DIR=<dir> npm run bench:glb:pipelines && npm run bench:glb:gpu`
+Cycle: [docs/investigations/glb.md](investigations/glb.md). Branch `feat/glb-native-pipeline`.
+Builds on **F-010** (that cycle stays intact — v0.1.0 gate 4/4, `test:glb` 89/89).
+
+**Question of the cycle:** what is the real difference between the GLB/glTF
+decode done *entirely* in JS versus done *entirely* in C++/WASM inside this
+runtime? Build both end to end, then measure — no advantage assumed.
+
+### Built — PIPELINE B (`parser: "native"`)
+
+`GLB bytes → WASM → bcpp::gltf::Pipeline` : container split
+(`parseContainer`, blob header/magic/chunk walk, no copy) · JSON parse
+(vendored **yyjson**, read-only) · glTF metadata (`parseMetadata` → a
+data-oriented `Document`: flat POD arrays for buffers/bufferViews/accessors/
+meshes/primitives/nodes/materials/textures/samplers/images + one packed string
+blob) · nodes topological + matrix→TRS · accessor→PrimDesc · geometry via
+**`bcpp::gltf::Batch` reused unchanged** (F-010's core) → one flat **TOC** int32
+array carrying every pointer + count + per-stage timing. JS
+(`web/asset/native.ts`) hands over the blob, calls `loadGLB` + `process`, reads
+the TOC, slices typed-array **views** out of WASM memory. **5 JS↔WASM crossings
+per asset**, flat (F-010's hybrid path is 9; pure JS is 0). BIN-embedded image
+bytes are returned as **zero-copy views over the caller's ArrayBuffer** — the
+native path never copies texture bytes into WASM.
+
+### VALIDATE — `npm run test:glb:native`: **114/114**
+
+PIPELINE B vs PIPELINE A (the JS front-end, `geometry:"js"` — the functional
+reference). Per fixture: container version/chunks, **all metadata** (buffers,
+bufferViews, accessors, meshes, primitives, materials, textures, samplers,
+image mime + bytes), **geometry** (positions / indices / UVs bit-identical,
+normals within `3e-4` where the source had them, AABB within `1e-4`, generated
+normals unit-length), **scene** (hierarchy, names, TRS within `1e-5`, roots),
+**asset** (primitive / vertex / index counts, material + texture refs, ignored
+features by subject). Plus exact known values for `tri` / `two-boxes`.
+
+### RENDER — `npm run test:glb:render`: **6/6**, both pipelines
+
+Every fixture rendered through A **and** B all the way to the pixels (Chromium
+WebGPU / WARP). Each side passes its structural checks (path, frustum, draw
+count, depth headroom, no GPU errors, not black); **render equivalence** holds —
+same vertex / draw / visible counts, screenshots match within mean channel
+Δ 0.0013–0.011. `DamagedHelmet` through the full native pipeline: base-colour
+texture, correct geometry, 5 crossings. Screenshots `bench/results/glb-*__B-native.png`.
+
+### BENCHMARK — GLB → Asset (Node, bench host, best-of-5 medians)
+
+| fixture | MB | verts | A (js / auto-eff) | B native | Aeff/B | x A | x B | blob→B |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| tri / two-boxes / Box / BoxTextured | ~0 | 3–24 | 0.07–0.09 | 0.11–0.13 | 0.56–0.77× | 0 | 5 | 1–6 KB |
+| Duck | 0.1 | 2 399 | 0.49 | 0.38 | **1.27×** | 0 | 5 | 118 KB |
+| DamagedHelmet | 3.6 | 14 556 | 1.29 | 2.01 | 0.64× | 0 | 5 | 3 685 KB |
+| vitrine ×5 (no normals) | 28–34 | ~1 M | 144–168 (auto) | 122–135 | **1.18–1.30×** | 9 | 5 | 28–35 MB |
+
+- **The C++ front-end is essentially free.** Container split ≈ 0, **JSON parse
+  0.02–0.06 ms**, metadata build 0.03–0.07 ms — *flat*, independent of file size
+  (the JSON chunk is small metadata; `DamagedHelmet` 3.6 MB and `tri` 0.8 KB
+  parse their JSON in the same 0.04 ms). Everything else in B's time is the
+  geometry core (identical to F-010) plus the blob copy.
+- **B wins where there is geometry work.** The vitrine corpus (real content:
+  ~1 M-vertex meshes, no source normals) decodes **18–30 % faster** in the full
+  native pipeline than in F-010's hybrid — fewer crossings (5 vs 9), metadata +
+  dispatch in C++ not JS, geometry read zero-copy straight from the blob, no
+  JS-side mega-buffer assembly. Duck (2.4 K verts) likewise **1.27×**.
+- **B loses on tiny assets** — fixed overhead (5 crossings + blob copy + yyjson
+  setup) is 0.13 ms vs JS's 0.08 ms. Absolute difference is 50 µs; irrelevant.
+- **B loses on texture-heavy already-GPU-ready assets** — `DamagedHelmet` 0.64×.
+  B copies the whole 3.6 MB blob (≈ 3 MB of it JPEG) into WASM to parse it;
+  A's JS front-end reads the packed-F32 attributes as zero-copy views and never
+  touches the texture bytes until GPU upload. (The image-view optimisation below
+  removed the *return* copy: native decode 4.57 ms → **1.95 ms**; the remaining
+  gap is the parse-time blob copy, which is architectural — C++ owning the
+  container parse means the bytes must be in linear memory.)
+- **Crossings:** A-js 0, A-auto 9, **B-native 5**, flat per asset regardless of
+  size (a 34 MB vitrine GLB crosses 5 times).
+- **Memory:** wasm-heap growth 0 for both once warm (reused `Batch` / `Pipeline`
+  buffers). SoA geometry output is the large allocation (45–55 MB for a 1 M-vertex
+  vitrine mesh) and is identical for both — same `Batch`.
+
+### SIMD — `-O3` vs `-O3 -msimd128`, native pipeline
+
+| stage | ratio |
+|---|---|
+| JSON parse / metadata | ~1.0× (not the bottleneck; ~0.03 ms either way) |
+| geometry — normal generation (vitrine) | **~1.00×** — indexed scatter, does not vectorise |
+| tiny fixtures | noise (0.7–1.4×, sub-0.2 ms) |
+
+Consistent with F-010: SIMD helps straight-line copy/AABB loops, not the
+scatter-heavy generation kernels. It stays on (shipping profile).
+
+### GPU / first-frame / steady-state — `npm run bench:glb:gpu` (browser, WARP)
+
+Every fixture is **upload-bound**. `createImageBitmap` (texture decode) dwarfs
+the GLB decode by 10–100×: `DamagedHelmet` image decode **~1050 ms** vs GLB
+decode ~3 ms; first-frame (GPU buffer + pipeline) 40–160 ms; steady frame
+0.2–0.5 ms; 1500–5000 fps. **The decode-pipeline choice is invisible at the
+render level** — load-to-render A/B is 0.82–1.38×, all of it first-frame and
+image-decode noise. (Same lesson as F-008: a CPU-side win is not an FPS win.)
+
+### Optimisations applied (each measured)
+
+| change | before → after |
+|---|---|
+| pipeline parses the blob in place (no second copy into its own vector) | DamagedHelmet native 6.4 → 4.6 ms |
+| one `GltfPipeline` per module instance (no per-call alloc) | steady decode #1 0.3 ms → #5 0.1 ms |
+| BIN image bytes returned as zero-copy views (not sliced out of WASM) | DamagedHelmet native 4.6 → **2.0 ms** |
+
+### DECIDE — result **C / D** (the benchmark's answer, not a prior assumption)
+
+**The full C++/WASM pipeline is a complete, validated alternative — 114/114 data
+equivalence, 6/6 render equivalence — and it is the faster path for
+geometry-heavy assets that need work (the real vitrine content: +18–30 %), with
+fewer boundary crossings (5 vs 9).** It is *not* faster across the board: for
+tiny assets the fixed overhead loses by microseconds, and for texture-heavy
+already-GPU-ready assets it loses because C++ owning the container parse forces
+the whole blob (textures included) into linear memory, where the JS front-end
+reads packed-F32 as zero-copy views.
+
+Crucially, **doing the container + JSON + metadata parse in C++ costs almost
+nothing** (~0.1 ms, flat) — there is no penalty to routing structural parsing
+through C++, so the boundary can sit wherever the geometry workload wants it:
+
+- `parser: "native"` — geometry-heavy / needs-work assets (vitrine-class real
+  content). One coherent C++ path, 5 crossings, fastest.
+- default (F-010's JS front-end + hybrid `geometry:"auto"`) — mixed / small /
+  texture-heavy-GPU-ready workloads.
+- future `parser: "auto"` — a cheap JSON peek (normals present + packed F32 +
+  textures → JS; else → native) could pick per asset.
+
+`develop` stays green; v0.1.0 untouched; F-010 stands as the previous cycle.
+
+---
+
 ## F-010 · GLB — JS parses, a C++/WASM core does the geometry work, hybrid dispatch picks per primitive
 `node bench/make-glb-fixtures.mjs && node --expose-gc bench/run-glb-profile.mjs`
 `npm run build && npm run test:glb && npm run test:glb:render && npm run bench:glb`
