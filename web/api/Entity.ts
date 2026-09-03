@@ -7,15 +7,15 @@ import type { Scene, MeshData } from "./Scene.js";
 import { STRIDE, FLAG } from "../../shared/layout.js";
 
 class ComponentVec3 {
-  constructor(private arr: () => Float32Array, private base: number) {}
+  constructor(private arr: () => Float32Array, private base: number, private touch: () => void) {}
   get x() { return this.arr()[this.base]; }
-  set x(v: number) { this.arr()[this.base] = v; }
+  set x(v: number) { this.arr()[this.base] = v; this.touch(); }
   get y() { return this.arr()[this.base + 1]; }
-  set y(v: number) { this.arr()[this.base + 1] = v; }
+  set y(v: number) { this.arr()[this.base + 1] = v; this.touch(); }
   get z() { return this.arr()[this.base + 2]; }
-  set z(v: number) { this.arr()[this.base + 2] = v; }
+  set z(v: number) { this.arr()[this.base + 2] = v; this.touch(); }
   set(x: number, y: number, z: number): this {
-    const a = this.arr(); a[this.base] = x; a[this.base + 1] = y; a[this.base + 2] = z; return this;
+    const a = this.arr(); a[this.base] = x; a[this.base + 1] = y; a[this.base + 2] = z; this.touch(); return this;
   }
   copyFromFloats = this.set;
 }
@@ -24,10 +24,13 @@ export class Transform {
   readonly position: ComponentVec3;
   readonly scaling: ComponentVec3;
 
+  /** flag this entity's transform dirty so evaluate() recomputes its subtree */
+  private touch = () => { this.scene._core.components.dirty[this.id] = 1; };
+
   constructor(private scene: Scene, readonly id: number) {
     const C = scene._core.components;
-    this.position = new ComponentVec3(() => C.pos, id * STRIDE.pos);
-    this.scaling = new ComponentVec3(() => C.scale, id * STRIDE.scale);
+    this.position = new ComponentVec3(() => C.pos, id * STRIDE.pos, this.touch);
+    this.scaling = new ComponentVec3(() => C.scale, id * STRIDE.scale, this.touch);
     this.scaling.set(1, 1, 1);
   }
 
@@ -35,6 +38,7 @@ export class Transform {
   setRotationQuaternion(x: number, y: number, z: number, w: number): this {
     const r = this.scene._core.components.rot, b = this.id * STRIDE.rot;
     r[b] = x; r[b + 1] = y; r[b + 2] = z; r[b + 3] = w;
+    this.touch();
     return this;
   }
   /** Babylon-order Euler (pitch X, yaw Y, roll Z) */
@@ -76,6 +80,7 @@ export class Entity {
     if (b) {
       C.localMin.set(b.min, this.id * STRIDE.localMin);
       C.localMax.set(b.max, this.id * STRIDE.localMax);
+      C.dirty[this.id] = 1; // local AABB changed → world AABB refit needed
     }
     return this;
   }

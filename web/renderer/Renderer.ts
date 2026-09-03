@@ -265,7 +265,11 @@ export class Renderer {
     const d = this.device;
     d.queue.writeBuffer(this.camBuf, 0, viewProj);
     this.ensureModelBuffer(Math.max(1, frame.visibleCount));
-    if (frame.visibleCount > 0)
+    // frame.stats.frameChanged === 0 → the visible set + instance matrices are
+    // byte-identical to last frame; the instance storage buffer is already
+    // correct, skip the re-upload. (The camera uniform still updates — a
+    // frameChanged=0 frame still redraws, e.g. for a resize or post-effect.)
+    if (frame.visibleCount > 0 && frame.stats.frameChanged !== 0)
       d.queue.writeBuffer(this.modelBuf, 0, frame.instanceWorld.buffer, frame.instanceWorld.byteOffset, frame.visibleCount * 64);
 
     const enc = d.createCommandEncoder();

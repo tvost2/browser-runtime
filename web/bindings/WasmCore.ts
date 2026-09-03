@@ -19,13 +19,15 @@ interface WasmWorld {
   setCount(n: number): void;
   posPtr(): number; rotPtr(): number; scalePtr(): number; parentPtr(): number;
   localMinPtr(): number; localMaxPtr(): number;
-  meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; viewProjPtr(): number;
+  meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; dirtyPtr(): number; viewProjPtr(): number;
+  markAllDirty(): void;
   evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean): number;
   visibleIdPtr(): number; instanceWorldPtr(): number; instanceMeshIdPtr(): number;
   batchesPtr(): number; batchCount(): number;
-  worldMatricesPtr(): number; worldSpherePtr(): number;
+  worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
+  sTransformsRecomputed(): number; sFrameChanged(): number;
 }
 
 export interface CoreComponents {
@@ -33,6 +35,8 @@ export interface CoreComponents {
   parent: Int32Array;
   localMin: Float32Array; localMax: Float32Array;
   meshId: Uint32Array; materialId: Uint32Array; flags: Uint32Array;
+  /** 1 = this entity's local transform (or localMin/Max) changed — set by Transform setters */
+  dirty: Uint8Array;
 }
 
 export class WasmCore {
@@ -93,7 +97,18 @@ export class WasmCore {
     C.meshId = u32(w.meshIdPtr(), cap * STRIDE.meshId);
     C.materialId = u32(w.materialIdPtr(), cap * STRIDE.materialId);
     C.flags = u32(w.flagsPtr(), cap * STRIDE.flags);
+    C.dirty = new Uint8Array(m.HEAPU8.buffer, w.dirtyPtr(), cap);
     this.viewProj = f32(w.viewProjPtr(), 16);
+  }
+
+  /** All-entity world-space AABB (min, max). Views over WASM memory; valid until
+   *  the next evaluate()/resize(). For the spatial index / physics sync / debug. */
+  worldBounds(): { min: Float32Array; max: Float32Array } {
+    const m = this.mod, w = this.world;
+    return {
+      min: new Float32Array(m.HEAPF32.buffer, w.worldMinPtr(), this._count * 3),
+      max: new Float32Array(m.HEAPF32.buffer, w.worldMaxPtr(), this._count * 3),
+    };
   }
 
   writeViewProj(m16: Float32Array) { this.viewProj.set(m16); }
@@ -120,9 +135,14 @@ export class WasmCore {
         visible: w.sVisible(), traversed: w.sTraversed(),
         culledDisabled: w.sCulledDisabled(), culledFrustum: w.sCulledFrustum(),
         batches: w.sBatches(), hierarchyRebuilds: w.sHierRebuilds(),
+        transformsRecomputed: w.sTransformsRecomputed(), frameChanged: w.sFrameChanged(),
       },
     };
   }
+
+  /** Mark every entity's transform dirty — forces a full recompute next
+   *  evaluate(). Use after a bulk write that bypassed the Transform setters. */
+  markAllDirty() { this.world.markAllDirty(); }
 
   /** All-entity world matrices (not just visible) — for gizmos, physics sync, debug. */
   worldMatrices(): Float32Array {
