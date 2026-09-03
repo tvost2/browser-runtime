@@ -10,3 +10,7 @@ export { box, sphere, subdivSphere } from "./meshes.js";
 export { CullStrategy, FLAG, STRIDE } from "../../shared/layout.js";
 export type { FrameResult, RenderBatch, EvalStats } from "../../shared/layout.js";
 export { WasmCore } from "../bindings/WasmCore.js";
+
+// asset pipeline (glTF / GLB) — Phase 1
+export { AssetManager, parseContainer, decodeGLB, isGLB, AlphaMode } from "../asset/index.js";
+export type { Asset, AssetNode, AssetMesh, AssetPrimitive, AssetMaterial, LoadResult } from "../asset/index.js";

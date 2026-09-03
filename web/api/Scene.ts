@@ -100,4 +100,16 @@ export class Scene {
     this._core.writeViewProj(this.camera.viewProj(aspect));
     return this._core.evaluate(this.cullStrategy, this.sortByMesh);
   }
+
+  private _assets?: import("../asset/AssetManager.js").AssetManager;
+
+  /** Load a .glb / .gltf and instantiate it into this scene. Convenience over
+   *  `new AssetManager().loadInto(url, scene)` (import from `web/asset`). */
+  async loadAsset(url: string) {
+    if (!this._assets) {
+      const { AssetManager } = await import("../asset/AssetManager.js");
+      this._assets = new AssetManager();
+    }
+    return this._assets.loadInto(url, this);
+  }
 }
