@@ -45,6 +45,7 @@ enum : int32_t {
     TOC_SLOTMAP_PTR, TOC_SLOTMAP_N,      // slotmap[i] = primitive index in doc.primitives for geometry slot i
     TOC_TIMINGS_PTR, TOC_TIMINGS_N,      // double[]
     TOC_COUNTERS_PTR, TOC_COUNTERS_N,    // double[]
+    TOC_BIN_BLOB_OFFSET,                 // byte offset of the BIN chunk data within the original blob
     TOC__COUNT
 };
 
@@ -273,6 +274,7 @@ struct Pipeline {
         toc[TOC_SLOTMAP_PTR] = P(slotmap.data());           toc[TOC_SLOTMAP_N] = (int32_t)slotmap.size();
         toc[TOC_TIMINGS_PTR] = P(timings);                  toc[TOC_TIMINGS_N] = T__COUNT;
         toc[TOC_COUNTERS_PTR] = P(counters);                toc[TOC_COUNTERS_N] = C__COUNT;
+        toc[TOC_BIN_BLOB_OFFSET] = container.bin ? (int32_t)(container.bin - blob) : 0;
     }
 
     int32_t tocPtr() { return (int32_t)(intptr_t)toc; }

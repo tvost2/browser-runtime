@@ -30,6 +30,7 @@ const enum T {
   POS_PTR, NRM_PTR, UV_PTR, TAN_PTR, IDX_PTR,
   OUTMETA_PTR, TOTAL_VERTS, TOTAL_IDX,
   SLOTMAP_PTR, SLOTMAP_N, TIMINGS_PTR, TIMINGS_N, COUNTERS_PTR, COUNTERS_N,
+  BIN_BLOB_OFFSET,
   COUNT,
 }
 // timings[] — T_* in the header
@@ -181,8 +182,11 @@ export async function decodeGLBNative(
       wrapT: sb >= 0 ? sampRaw[sb + 3] : 10497,
     });
   }
-  const binPtr = toc[T.BIN_PTR], binLen = toc[T.BIN_N];
-  const auxPtr = toc[T.AUXBIN_PTR], auxLen = toc[T.AUXBIN_N];
+  // image bytes: for BIN-embedded images, take a VIEW straight over the caller's
+  // original ArrayBuffer — the native pipeline never copies texture bytes into
+  // WASM. (data-URI images were base64-decoded in C++, so those come from auxbin.)
+  const binBlobOff = toc[T.BIN_BLOB_OFFSET];
+  const auxPtr = toc[T.AUXBIN_PTR];
   const imgRaw = i32(toc[T.IMG_PTR], toc[T.IMG_N] * DIMG);
   const imgRawU = u32(toc[T.IMG_PTR], toc[T.IMG_N] * DIMG);
   const images: AssetImage[] = [];
@@ -190,12 +194,11 @@ export async function decodeGLBNative(
     const b = i * DIMG;
     const uriKind = imgRaw[b + 1], dOff = imgRawU[b + 2], dLen = imgRawU[b + 3];
     const mimeOff = imgRawU[b + 4], mimeLen = imgRawU[b + 5];
-    let bytesOut = new Uint8Array();
-    if (uriKind === 0 && binPtr) bytesOut = bytesAt(binPtr + dOff, dLen).slice();
-    else if (uriKind === 1 && auxPtr) bytesOut = bytesAt(auxPtr + dOff, dLen).slice();
+    let bytesOut: Uint8Array = new Uint8Array();
+    if (uriKind === 0) bytesOut = bytes.subarray(binBlobOff + dOff, binBlobOff + dOff + dLen);      // view, no copy
+    else if (uriKind === 1 && auxPtr) bytesOut = new Uint8Array(bytesAt(auxPtr + dOff, dLen));      // data-URI: one copy out of auxbin
     images.push({ mimeType: mimeLen ? str(mimeOff, mimeLen) : "image/png", bytes: bytesOut });
   }
-  void binLen; void auxLen;
 
   // ---- nodes ----
   const nodeI = i32(toc[T.NODES_PTR], toc[T.NODES_N] * DNODE);
