@@ -139,7 +139,17 @@ int main() {
     ref.markHierarchyDirty();
     ref.evaluate(vp, CullStrategy::Standard, true);
 
-    int mismatch = 0;
+    int mismatch = 0, listMismatch = 0, patched = 0;
+    auto instEq = [](World& a, World& b) {
+        if (a.instanceWorld.size() != b.instanceWorld.size()) return false;
+        for (size_t i = 0; i < a.instanceWorld.size(); ++i) if (!mat_eq(a.instanceWorld[i], b.instanceWorld[i])) return false;
+        if (a.instanceMeshId != b.instanceMeshId) return false;
+        if (a.batches.size() != b.batches.size()) return false;
+        for (size_t i = 0; i < a.batches.size(); ++i)
+            if (a.batches[i].meshId != b.batches[i].meshId || a.batches[i].firstInstance != b.batches[i].firstInstance
+                || a.batches[i].instanceCount != b.batches[i].instanceCount) return false;
+        return true;
+    };
     for (int iter = 0; iter < 200; ++iter) {
         uint32_t k = (uint32_t)(frand() * N);
         w.localPos[k].z += (frand() - 0.5f) * 4.0f;
@@ -147,12 +157,68 @@ int main() {
         ref.localPos[k].z = w.localPos[k].z;
         ref.markAllDirty();
 
-        w.evaluate(vp, CullStrategy::Standard, false);
-        ref.evaluate(vp, CullStrategy::Standard, false);
+        w.evaluate(vp, CullStrategy::Standard, true);   // sortByMesh — exercise the counting-sort slot map
+        ref.evaluate(vp, CullStrategy::Standard, true);
         if (!worlds_eq(snap(w).world, snap(ref).world)) mismatch++;
         if (w.visibleId != ref.visibleId) mismatch++;
+        // the render list (matrices + batches) MUST match a full rebuild whether
+        // it was patched in place or rebuilt
+        if (!instEq(w, ref)) listMismatch++;
+        if (w.stats.listRebuilt == 0) {
+            patched++;
+            // patch path: dirtySlots must be exactly the visible+recomputed rows
+            if (w.stats.dirtySlots > w.stats.transformsRecomputed) listMismatch++;
+        }
     }
     check(mismatch == 0, "200 random edits: incremental == full every frame");
+    check(listMismatch == 0, "200 random edits: render list (matrices+batches) == full rebuild");
+    check(patched > 100, "most frames patched the list in place (not rebuilt)");
+    std::printf("  (%d/200 frames patched the render list in place)\n", patched);
+
+    // ---- 7b. incremental cull: camera static, one entity moves out of frustum ----
+    // pick a currently-visible entity, shove it far behind the camera, verify it
+    // leaves the visible set and the list rebuilds
+    {
+        uint32_t vis = w.visibleId.empty() ? 0 : w.visibleId[w.visibleId.size() / 2];
+        w.localPos[vis] = {0, 0, -9999};   // behind near plane
+        w.markDirty(vis);
+        w.evaluate(vp, CullStrategy::Standard, true);
+        bool gone = std::find(w.visibleId.begin(), w.visibleId.end(), vis) == w.visibleId.end();
+        check(gone, "entity moved behind camera leaves the visible set (incremental cull)");
+        // and a full re-cull agrees
+        ref.localPos[vis] = w.localPos[vis]; ref.markAllDirty();
+        ref.evaluate(vp, CullStrategy::Standard, true);
+        check(w.visibleId == ref.visibleId, "incremental cull set == full re-cull after the move");
+    }
+
+    // ---- 7c. camera pan after incremental frames == from-scratch ----
+    {
+        Mat4 vpc = vp; vpc.m[12] += 30; vpc.m[13] -= 12;
+        w.evaluate(vpc, CullStrategy::Standard, true);
+        check(w.stats.listRebuilt == 1, "camera move forces a list rebuild");
+        World fresh; fresh.resize(N);
+        fresh.parent = w.parent; fresh.localPos = w.localPos; fresh.localRot = w.localRot; fresh.localScale = w.localScale;
+        fresh.localMin = w.localMin; fresh.localMax = w.localMax; fresh.flags = w.flags; fresh.meshId = w.meshId;
+        fresh.markHierarchyDirty();
+        fresh.evaluate(vpc, CullStrategy::Standard, true);
+        check(w.visibleId == fresh.visibleId, "camera-pan visible set == from-scratch");
+        check(instEq(w, fresh), "camera-pan render list == from-scratch");
+    }
+
+    // ---- 7d. visibility toggle invalidates the list ----
+    {
+        uint32_t e = w.visibleId.empty() ? 0 : w.visibleId[0];
+        w.flags[e] &= ~F_VISIBLE;
+        w.markDirty(e); w.markMeshLayoutDirty();
+        w.evaluate(vp, CullStrategy::Standard, true);
+        bool hidden = std::find(w.visibleId.begin(), w.visibleId.end(), e) == w.visibleId.end();
+        check(hidden, "clearing F_VISIBLE removes the entity next frame");
+        w.flags[e] |= F_VISIBLE;
+        w.markDirty(e); w.markMeshLayoutDirty();
+        w.evaluate(vp, CullStrategy::Standard, true);
+        bool back = std::find(w.visibleId.begin(), w.visibleId.end(), e) != w.visibleId.end();
+        check(back, "restoring F_VISIBLE brings it back");
+    }
 
     // ---- 8. resize() preserves data across a capacity growth ----
     World g;

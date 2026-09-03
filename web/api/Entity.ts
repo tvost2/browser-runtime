@@ -62,8 +62,15 @@ export class Entity {
   }
 
   private flag(bit: number, on: boolean) {
-    const f = this.scene._core.components.flags;
-    if (on) f[this.id] |= bit; else f[this.id] &= ~bit;
+    const C = this.scene._core.components;
+    const prev = C.flags[this.id];
+    const next = on ? prev | bit : prev & ~bit;
+    if (next === prev) return;
+    C.flags[this.id] = next;
+    // a visibility / enabled / cull flag change alters the render list → force a
+    // re-cull of this entity and a render-list rebuild
+    C.dirty[this.id] = 1;
+    this.scene._core.markMeshLayoutDirty();
   }
   get enabled() { return !!(this.scene._core.components.flags[this.id] & FLAG.ENABLED); }
   set enabled(v: boolean) { this.flag(FLAG.ENABLED, v); }
@@ -75,13 +82,17 @@ export class Entity {
   setMesh(mesh: number | MeshData): this {
     const meshId = typeof mesh === "number" ? mesh : this.scene.registerMesh(mesh);
     const C = this.scene._core.components;
+    const changed = C.meshId[this.id] !== meshId;
     C.meshId[this.id] = meshId;
     const b = this.scene._meshBounds.get(meshId);
     if (b) {
       C.localMin.set(b.min, this.id * STRIDE.localMin);
       C.localMax.set(b.max, this.id * STRIDE.localMax);
-      C.dirty[this.id] = 1; // local AABB changed → world AABB refit needed
     }
+    C.dirty[this.id] = 1; // local AABB changed → world AABB refit needed
+    // a meshId change moves this instance between draw batches → render list must
+    // rebuild even if the visible set is unchanged
+    if (changed) this.scene._core.markMeshLayoutDirty();
     return this;
   }
   /** ergonomic form:  entity.mesh = box();  (auto-registers + dedups) */

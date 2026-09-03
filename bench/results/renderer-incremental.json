@@ -1,0 +1,467 @@
+{
+  "kind": "renderer-incremental",
+  "sizes": [
+    10000,
+    50000,
+    100000,
+    250000
+  ],
+  "rows": [
+    {
+      "n": 10000,
+      "standard": {
+        "static": {
+          "totalMs": 0.12950000000000728,
+          "transformUs": 83.5999984741211,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 0.17849999999998545,
+          "transformUs": 61.5,
+          "cullUs": 90,
+          "listUs": 8.5,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 1%": {
+          "totalMs": 0.2504000000000133,
+          "transformUs": 117.9000015258789,
+          "cullUs": 100.5,
+          "listUs": 8.699999809265137,
+          "dirtySlots": 7,
+          "listRebuilt": 0,
+          "uploadRows": 7
+        },
+        "transform 10%": {
+          "totalMs": 0.8053999999999633,
+          "transformUs": 570,
+          "cullUs": 196,
+          "listUs": 11.100000381469727,
+          "dirtySlots": 56,
+          "listRebuilt": 0,
+          "uploadRows": 56
+        },
+        "camera pan": {
+          "totalMs": 0.7423000000001139,
+          "transformUs": 99.4000015258789,
+          "cullUs": 542.5999755859375,
+          "listUs": 72.4000015258789,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 0.8432999999999993,
+          "transformUs": 187,
+          "cullUs": 547.2999877929688,
+          "listUs": 48.400001525878906,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 0.13079999999990832,
+          "transformUs": 100.5,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 2.6666000000000167,
+          "transformUs": 2141.5,
+          "cullUs": 407.20001220703125,
+          "listUs": 22.100000381469727,
+          "dirtySlots": 480,
+          "listRebuilt": 0,
+          "uploadRows": 480
+        }
+      }
+    },
+    {
+      "n": 50000,
+      "standard": {
+        "static": {
+          "totalMs": 0.30780000000004293,
+          "transformUs": 289.3999938964844,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 0.9663999999997941,
+          "transformUs": 443.3999938964844,
+          "cullUs": 469.20001220703125,
+          "listUs": 19.700000762939453,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 1%": {
+          "totalMs": 1.3962999999998829,
+          "transformUs": 821.2000122070312,
+          "cullUs": 525.7999877929688,
+          "listUs": 20.700000762939453,
+          "dirtySlots": 21,
+          "listRebuilt": 0,
+          "uploadRows": 21
+        },
+        "transform 10%": {
+          "totalMs": 4.728800000000319,
+          "transformUs": 3518.5,
+          "cullUs": 1032.4000244140625,
+          "listUs": 52.599998474121094,
+          "dirtySlots": 240,
+          "listRebuilt": 0,
+          "uploadRows": 240
+        },
+        "camera pan": {
+          "totalMs": 3.5969999999997526,
+          "transformUs": 518.9000244140625,
+          "cullUs": 2715.5,
+          "listUs": 299,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 4.370300000000498,
+          "transformUs": 1323.199951171875,
+          "cullUs": 2700.300048828125,
+          "listUs": 289.29998779296875,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 0.5395999999991545,
+          "transformUs": 508.1000061035156,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 17.721700000000055,
+          "transformUs": 14682.7998046875,
+          "cullUs": 2587.39990234375,
+          "listUs": 221.60000610351562,
+          "dirtySlots": 2223,
+          "listRebuilt": 0,
+          "uploadRows": 2223
+        }
+      }
+    },
+    {
+      "n": 100000,
+      "standard": {
+        "static": {
+          "totalMs": 0.9092000000000553,
+          "transformUs": 856.5,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 2.1424999999999272,
+          "transformUs": 1024.300048828125,
+          "cullUs": 991.4000244140625,
+          "listUs": 38.5,
+          "dirtySlots": 10,
+          "listRebuilt": 0,
+          "uploadRows": 10
+        },
+        "transform 1%": {
+          "totalMs": 3.7538000000004104,
+          "transformUs": 2233.300048828125,
+          "cullUs": 1244.5999755859375,
+          "listUs": 64.4000015258789,
+          "dirtySlots": 61,
+          "listRebuilt": 0,
+          "uploadRows": 61
+        },
+        "transform 10%": {
+          "totalMs": 14.416900000000169,
+          "transformUs": 11098.5,
+          "cullUs": 3013.300048828125,
+          "listUs": 174.10000610351562,
+          "dirtySlots": 496,
+          "listRebuilt": 0,
+          "uploadRows": 496
+        },
+        "camera pan": {
+          "totalMs": 5.651700000000346,
+          "transformUs": 771.9000244140625,
+          "cullUs": 4218.7001953125,
+          "listUs": 601.0999755859375,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 6.941000000000713,
+          "transformUs": 2143.199951171875,
+          "cullUs": 4013.10009765625,
+          "listUs": 601.7000122070312,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 0.7842999999993481,
+          "transformUs": 762.5999755859375,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 35.65400000000227,
+          "transformUs": 29624,
+          "cullUs": 4523.39990234375,
+          "listUs": 431.3999938964844,
+          "dirtySlots": 4438,
+          "listRebuilt": 0,
+          "uploadRows": 4438
+        }
+      }
+    },
+    {
+      "n": 250000,
+      "standard": {
+        "static": {
+          "totalMs": 1.7572000000000116,
+          "transformUs": 1727.4000244140625,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 7.52480000000287,
+          "transformUs": 3737.89990234375,
+          "cullUs": 3929.5,
+          "listUs": 154.3000030517578,
+          "dirtySlots": 22,
+          "listRebuilt": 0,
+          "uploadRows": 22
+        },
+        "transform 1%": {
+          "totalMs": 11.89089999999851,
+          "transformUs": 7074.89990234375,
+          "cullUs": 4547.2001953125,
+          "listUs": 187.39999389648438,
+          "dirtySlots": 116,
+          "listRebuilt": 0,
+          "uploadRows": 116
+        },
+        "transform 10%": {
+          "totalMs": 32.44710000000123,
+          "transformUs": 25258.900390625,
+          "cullUs": 6194.60009765625,
+          "listUs": 404.70001220703125,
+          "dirtySlots": 1194,
+          "listRebuilt": 0,
+          "uploadRows": 1194
+        },
+        "camera pan": {
+          "totalMs": 17.047899999997753,
+          "transformUs": 1910.199951171875,
+          "cullUs": 13265.5,
+          "listUs": 1713.9000244140625,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 21.075300000000425,
+          "transformUs": 6915.2998046875,
+          "cullUs": 12656.599609375,
+          "listUs": 1869,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 1.6902000000009139,
+          "transformUs": 1671.0999755859375,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 100.16949999999997,
+          "transformUs": 86482.1015625,
+          "cullUs": 14117.099609375,
+          "listUs": 1427.0999755859375,
+          "dirtySlots": 11271,
+          "listRebuilt": 0,
+          "uploadRows": 11271
+        }
+      },
+      "bvh": {
+        "static": {
+          "totalMs": 1.9676999999974214,
+          "transformUs": 1923.5999755859375,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 8.38300000000163,
+          "transformUs": 2494.10009765625,
+          "cullUs": 5566,
+          "listUs": 137.89999389648438,
+          "dirtySlots": 22,
+          "listRebuilt": 0,
+          "uploadRows": 22
+        },
+        "transform 1%": {
+          "totalMs": 19.405800000000454,
+          "transformUs": 5921.10009765625,
+          "cullUs": 12966.599609375,
+          "listUs": 274,
+          "dirtySlots": 116,
+          "listRebuilt": 0,
+          "uploadRows": 116
+        },
+        "transform 10%": {
+          "totalMs": 49.85960000000341,
+          "transformUs": 27155.099609375,
+          "cullUs": 23309.400390625,
+          "listUs": 359.5,
+          "dirtySlots": 1194,
+          "listRebuilt": 0,
+          "uploadRows": 1194
+        },
+        "camera pan": {
+          "totalMs": 6.406200000004901,
+          "transformUs": 1721.800048828125,
+          "cullUs": 2673.89990234375,
+          "listUs": 1738.300048828125,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 20.364500000003318,
+          "transformUs": 5867.5,
+          "cullUs": 12575.2998046875,
+          "listUs": 1939.5999755859375,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 3.228900000001886,
+          "transformUs": 3201.300048828125,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 108.07150000000547,
+          "transformUs": 76924.796875,
+          "cullUs": 28732,
+          "listUs": 1107.300048828125,
+          "dirtySlots": 11271,
+          "listRebuilt": 0,
+          "uploadRows": 11271
+        }
+      },
+      "auto": {
+        "static": {
+          "totalMs": 1.6534000000028755,
+          "transformUs": 1645.5999755859375,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "transform 0.1%": {
+          "totalMs": 4.997400000000198,
+          "transformUs": 2432.60009765625,
+          "cullUs": 2385.89990234375,
+          "listUs": 91.19999694824219,
+          "dirtySlots": 22,
+          "listRebuilt": 0,
+          "uploadRows": 22
+        },
+        "transform 1%": {
+          "totalMs": 8.387900000001537,
+          "transformUs": 5211.89990234375,
+          "cullUs": 3021.800048828125,
+          "listUs": 114.9000015258789,
+          "dirtySlots": 116,
+          "listRebuilt": 0,
+          "uploadRows": 116
+        },
+        "transform 10%": {
+          "totalMs": 34.2815000000046,
+          "transformUs": 26955,
+          "cullUs": 6900.60009765625,
+          "listUs": 305,
+          "dirtySlots": 1194,
+          "listRebuilt": 0,
+          "uploadRows": 1194
+        },
+        "camera pan": {
+          "totalMs": 6.327600000004168,
+          "transformUs": 1769.9000244140625,
+          "cullUs": 2745.60009765625,
+          "listUs": 1635,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "camera + 1%": {
+          "totalMs": 18.943200000001525,
+          "transformUs": 5248.5,
+          "cullUs": 11252.7998046875,
+          "listUs": 1721.4000244140625,
+          "dirtySlots": 0,
+          "listRebuilt": 1,
+          "uploadRows": -1
+        },
+        "visibility flip 0.1%": {
+          "totalMs": 2.863500000006752,
+          "transformUs": 2838.10009765625,
+          "cullUs": 0,
+          "listUs": 0,
+          "dirtySlots": 0,
+          "listRebuilt": 0,
+          "uploadRows": 0
+        },
+        "high churn 100%": {
+          "totalMs": 95.08209999999963,
+          "transformUs": 82237.5,
+          "cullUs": 11429.099609375,
+          "listUs": 948.9000244140625,
+          "dirtySlots": 11271,
+          "listRebuilt": 0,
+          "uploadRows": 11271
+        }
+      }
+    }
+  ]
+}

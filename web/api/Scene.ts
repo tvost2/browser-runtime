@@ -15,7 +15,7 @@ export interface MeshData {
  *  decision: the demo/benchmark workloads build once. */
 export class Scene {
   readonly camera = new Camera();
-  cullStrategy = CullStrategy.Standard;
+  cullStrategy: CullStrategy = CullStrategy.Auto;
   sortByMesh = true;
 
   /** @internal */ _core: WasmCore;
@@ -98,10 +98,13 @@ export class Scene {
     this._core.setCount(0);
   }
 
+  /** the FrameResult from the most recent evaluate() (debug / bench) */
+  _lastFrame?: FrameResult;
+
   /** Run the whole per-frame CPU pipeline in WASM. One boundary crossing. */
   evaluate(aspect: number): FrameResult {
     this._core.writeViewProj(this.camera.viewProj(aspect));
-    return this._core.evaluate(this.cullStrategy, this.sortByMesh);
+    return (this._lastFrame = this._core.evaluate(this.cullStrategy, this.sortByMesh));
   }
 
   private _assets?: import("../asset/AssetManager.js").AssetManager;

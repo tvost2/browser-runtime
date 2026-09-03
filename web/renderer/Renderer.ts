@@ -28,6 +28,9 @@ struct VSOut {
   @location(1) uv : vec2<f32>,
 };
 
+// pos / normal / uv arrive as three separate vertex buffers (SoA) — the
+// C++ decode already stores geometry that way, so upload is a straight
+// memcpy per attribute with no interleave pass.
 @vertex fn vs(@location(0) p : vec3<f32>, @location(1) nrm : vec3<f32>,
               @location(2) uv : vec2<f32>, @builtin(instance_index) i : u32) -> VSOut {
   let world = models[i];
@@ -65,7 +68,9 @@ export interface MaterialSpec {
   doubleSided?: boolean;
 }
 
-const VSTRIDE = 32; // pos3 + normal3 + uv2
+const POS_STRIDE = 12; // vec3 f32
+const NRM_STRIDE = 12;
+const UV_STRIDE = 8;
 
 export class Renderer {
   device!: GPUDevice;
@@ -74,13 +79,30 @@ export class Renderer {
   gpuMs = 0;
 
   private ctx!: GPUCanvasContext;
+  private canvas!: HTMLCanvasElement;
+  private depthW = 0;
+  private depthH = 0;
   private format!: GPUTextureFormat;
   private pipeline!: GPURenderPipeline;
   private pipelineNoCull!: GPURenderPipeline;
   private g0Layout!: GPUBindGroupLayout;
   private g1Layout!: GPUBindGroupLayout;
-  private vbuf!: GPUBuffer;
+  // append-only geometry arena: three SoA vertex buffers + one index buffer.
+  // A new mesh is written at the tail (one partial writeBuffer per attribute);
+  // the buffer only grows (doubling, GPU-side copy) when the tail runs out.
+  private posBuf!: GPUBuffer;
+  private nrmBuf!: GPUBuffer;
+  private uvBuf!: GPUBuffer;
   private ibuf!: GPUBuffer;
+  private vertHead = 0;   // next free vertex slot
+  private idxHead = 0;    // next free index slot
+  private vertCap = 0;    // capacity in vertices
+  private idxCap = 0;     // capacity in indices
+  private _defaultNrm = new Float32Array(0); // (0,1,0) filler for meshes with no normals
+  /** running total of geometry bytes pushed to the GPU (all uploads) */
+  geomBytesTotal = 0;
+  /** geometry bytes pushed on the last uploadMeshes() call */
+  lastGeomUploadBytes = 0;
   private camBuf!: GPUBuffer;
   private modelBuf!: GPUBuffer;
   private modelCapacity = 0;
@@ -98,10 +120,12 @@ export class Renderer {
   drawCalls = 0;
 
   static async create(canvas: HTMLCanvasElement): Promise<Renderer> {
-    if (!navigator.gpu) throw new Error("WebGPU not available");
+    if (!navigator.gpu) throw new Error("WebGPU is not available in this browser (need Chrome/Edge 113+, or enable it)");
     const r = new Renderer();
-    r.adapter = (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }))!;
-    if (!r.adapter) throw new Error("no GPU adapter");
+    r.adapter = (await navigator.gpu.requestAdapter({ powerPreference: "high-performance" }))
+      ?? (await navigator.gpu.requestAdapter())                        // retry without a preference
+      ?? (await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }))!;  // last resort: software
+    if (!r.adapter) throw new Error("navigator.gpu.requestAdapter() returned null — no WebGPU adapter available");
     r.canTimestamp = r.adapter.features.has("timestamp-query");
     r.device = await r.adapter.requestDevice({ requiredFeatures: r.canTimestamp ? ["timestamp-query"] : [] });
     r.device.addEventListener("uncapturederror", (e: Event) => {
@@ -109,6 +133,7 @@ export class Renderer {
       console.error("WebGPU:", (e as GPUUncapturedErrorEvent).error.message);
       (r as unknown as { lastError?: string }).lastError = (e as GPUUncapturedErrorEvent).error.message;
     });
+    r.canvas = canvas;
     r.ctx = canvas.getContext("webgpu")!;
     r.format = navigator.gpu.getPreferredCanvasFormat();
     r.ctx.configure({ device: r.device, format: r.format, alphaMode: "opaque" });
@@ -143,14 +168,11 @@ export class Renderer {
       layout,
       vertex: {
         module: mod, entryPoint: "vs",
-        buffers: [{
-          arrayStride: VSTRIDE,
-          attributes: [
-            { shaderLocation: 0, offset: 0, format: "float32x3" as const },
-            { shaderLocation: 1, offset: 12, format: "float32x3" as const },
-            { shaderLocation: 2, offset: 24, format: "float32x2" as const },
-          ],
-        }],
+        buffers: [
+          { arrayStride: POS_STRIDE, attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" as const }] },
+          { arrayStride: NRM_STRIDE, attributes: [{ shaderLocation: 1, offset: 0, format: "float32x3" as const }] },
+          { arrayStride: UV_STRIDE, attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" as const }] },
+        ],
       },
       fragment: { module: mod, entryPoint: "fs", targets: [{ format: this.format }] },
       depthStencil: { format: "depth24plus" as const, depthWriteEnabled: true, depthCompare: "less" as const },
@@ -166,12 +188,15 @@ export class Renderer {
   }
 
   resize(w: number, h: number) {
+    w = Math.max(1, w | 0); h = Math.max(1, h | 0);
+    if (w === this.depthW && h === this.depthH && this.depth) return;
     this.depth?.destroy();
     this.depth = this.device.createTexture({ size: [w, h], format: "depth24plus", usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    this.depthW = w; this.depthH = h;
   }
 
   dispose() {
-    for (const b of [this.vbuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead]) b?.destroy();
+    for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
     this.device.destroy();
@@ -216,41 +241,93 @@ export class Renderer {
   /** which material a mesh (primitive) draws with */
   setMeshMaterial(meshId: number, materialId: number) { this.meshMaterial.set(meshId, materialId); }
 
-  /** Pack every registered mesh into one vertex + one index buffer. Call once
-   *  (or whenever the mesh set changes). */
+  /** Append any not-yet-uploaded meshes to the geometry arena. O(new data),
+   *  not O(all meshes) — a mesh already in `slots` is skipped. The buffers
+   *  grow by doubling (GPU-side copy) only when the tail overflows. */
   uploadMeshes(meshes: Map<number, MeshData>) {
-    let vCount = 0, iCount = 0;
-    for (const m of meshes.values()) { vCount += m.positions.length / 3; iCount += m.indices.length; }
-    const verts = new Float32Array(Math.max(1, vCount) * 8);
-    const idx = new Uint32Array(Math.max(1, iCount));
-    let vOff = 0, iOff = 0;
+    this.lastGeomUploadBytes = 0;
+    // what's new, and how much room it needs
+    let newV = 0, newI = 0;
+    const fresh: [number, MeshData][] = [];
     for (const [id, m] of meshes) {
-      const baseVertex = vOff;
+      if (this.slots.has(id)) continue;
+      fresh.push([id, m]);
+      newV += m.positions.length / 3;
+      newI += m.indices.length;
+    }
+    if (fresh.length === 0) return;
+
+    if (this.vertHead + newV > this.vertCap) this.growVerts(this.vertHead + newV);
+    if (this.idxHead + newI > this.idxCap) this.growIndices(this.idxHead + newI);
+
+    const d = this.device;
+    // reusable (0,1,0) filler for meshes without normals
+    let maxN = 0;
+    for (const [, m] of fresh) if (!m.normals) maxN = Math.max(maxN, m.positions.length);
+    if (maxN > this._defaultNrm.length) {
+      this._defaultNrm = new Float32Array(maxN);
+      for (let i = 1; i < maxN; i += 3) this._defaultNrm[i] = 1;
+    }
+
+    for (const [id, m] of fresh) {
       const n = m.positions.length / 3;
       const uv = (m as MeshData & { uv0?: Float32Array | null }).uv0 ?? null;
-      for (let i = 0; i < n; i++) {
-        const o = (vOff + i) * 8;
-        verts[o + 0] = m.positions[i * 3]; verts[o + 1] = m.positions[i * 3 + 1]; verts[o + 2] = m.positions[i * 3 + 2];
-        verts[o + 3] = m.normals ? m.normals[i * 3] : 0;
-        verts[o + 4] = m.normals ? m.normals[i * 3 + 1] : 1;
-        verts[o + 5] = m.normals ? m.normals[i * 3 + 2] : 0;
-        verts[o + 6] = uv ? uv[i * 2] : 0; verts[o + 7] = uv ? uv[i * 2 + 1] : 0;
-      }
-      idx.set(m.indices, iOff);
-      this.slots.set(id, { firstIndex: iOff, indexCount: m.indices.length, baseVertex });
-      vOff += n; iOff += m.indices.length;
+      const vByte = this.vertHead * POS_STRIDE;
+
+      d.queue.writeBuffer(this.posBuf, vByte, m.positions.buffer, m.positions.byteOffset, n * 12);
+      if (m.normals) d.queue.writeBuffer(this.nrmBuf, vByte, m.normals.buffer, m.normals.byteOffset, n * 12);
+      else d.queue.writeBuffer(this.nrmBuf, vByte, this._defaultNrm.buffer, 0, n * 12);
+      if (uv && uv.length >= n * 2) d.queue.writeBuffer(this.uvBuf, this.vertHead * UV_STRIDE, uv.buffer, uv.byteOffset, n * 8);
+      d.queue.writeBuffer(this.ibuf, this.idxHead * 4, m.indices.buffer, m.indices.byteOffset, m.indices.length * 4);
+
+      this.slots.set(id, { firstIndex: this.idxHead, indexCount: m.indices.length, baseVertex: this.vertHead });
+      const b = n * 12 + n * 12 + (uv ? n * 8 : 0) + m.indices.length * 4;
+      this.lastGeomUploadBytes += b;
+      this.vertHead += n;
+      this.idxHead += m.indices.length;
     }
-    this.vbuf?.destroy(); this.ibuf?.destroy();
-    this.vbuf = this.device.createBuffer({ size: Math.max(32, verts.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
-    this.ibuf = this.device.createBuffer({ size: Math.max(4, idx.byteLength), usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
-    this.device.queue.writeBuffer(this.vbuf, 0, verts);
-    this.device.queue.writeBuffer(this.ibuf, 0, idx);
+    this.geomBytesTotal += this.lastGeomUploadBytes;
   }
+
+  private growVerts(need: number) {
+    const d = this.device;
+    const cap = Math.max(need, this.vertCap * 2, 65536);
+    const mk = () => d.createBuffer({ size: cap * 12, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    const np = mk(), nn = mk(), nu = d.createBuffer({ size: cap * UV_STRIDE, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    if (this.vertHead > 0) {
+      const enc = d.createCommandEncoder();
+      enc.copyBufferToBuffer(this.posBuf, 0, np, 0, this.vertHead * 12);
+      enc.copyBufferToBuffer(this.nrmBuf, 0, nn, 0, this.vertHead * 12);
+      enc.copyBufferToBuffer(this.uvBuf, 0, nu, 0, this.vertHead * UV_STRIDE);
+      d.queue.submit([enc.finish()]);
+    }
+    this.posBuf?.destroy(); this.nrmBuf?.destroy(); this.uvBuf?.destroy();
+    this.posBuf = np; this.nrmBuf = nn; this.uvBuf = nu;
+    this.vertCap = cap;
+  }
+
+  private growIndices(need: number) {
+    const d = this.device;
+    const cap = Math.max(need, this.idxCap * 2, 131072);
+    const ni = d.createBuffer({ size: cap * 4, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    if (this.idxHead > 0) {
+      const enc = d.createCommandEncoder();
+      enc.copyBufferToBuffer(this.ibuf, 0, ni, 0, this.idxHead * 4);
+      d.queue.submit([enc.finish()]);
+    }
+    this.ibuf?.destroy();
+    this.ibuf = ni;
+    this.idxCap = cap;
+  }
+
+  private modelBufValid = false;    // false → the instance buffer holds no valid data yet (force a full upload)
+  private lastUploadedVisible = -1;
 
   private ensureModelBuffer(instances: number) {
     if (instances <= this.modelCapacity && this.modelBuf) return;
     this.modelCapacity = Math.max(instances, Math.ceil(this.modelCapacity * 1.5), 1024);
     this.modelBuf?.destroy();
+    this.modelBufValid = false;
     this.modelBuf = this.device.createBuffer({ size: this.modelCapacity * 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.g0 = this.device.createBindGroup({
       layout: this.g0Layout,
@@ -261,16 +338,61 @@ export class Renderer {
     });
   }
 
+  /** bytes uploaded to the instance storage buffer on the last render() */
+  lastUploadBytes = 0;
+
   render(viewProj: Float32Array, frame: FrameResult) {
     const d = this.device;
+    // the canvas colour texture auto-tracks canvas.width/height; keep the depth
+    // texture in lock-step or beginRenderPass rejects the size mismatch and the
+    // frame is silently dropped (black screen).
+    if (this.canvas && (this.canvas.width !== this.depthW || this.canvas.height !== this.depthH))
+      this.resize(this.canvas.width, this.canvas.height);
     d.queue.writeBuffer(this.camBuf, 0, viewProj);
     this.ensureModelBuffer(Math.max(1, frame.visibleCount));
-    // frame.stats.frameChanged === 0 → the visible set + instance matrices are
-    // byte-identical to last frame; the instance storage buffer is already
-    // correct, skip the re-upload. (The camera uniform still updates — a
-    // frameChanged=0 frame still redraws, e.g. for a resize or post-effect.)
-    if (frame.visibleCount > 0 && frame.stats.frameChanged !== 0)
-      d.queue.writeBuffer(this.modelBuf, 0, frame.instanceWorld.buffer, frame.instanceWorld.byteOffset, frame.visibleCount * 64);
+    this.lastUploadBytes = 0;
+
+    // Instance storage buffer sync:
+    //  · frameChanged === 0        → nothing changed, buffer is already correct.
+    //  · listRebuilt === 1         → the whole list moved, one full upload.
+    //  · listRebuilt === 0 + dirty → the visible set + batch layout are identical
+    //    to last frame; only the matrix rows in `dirtySlots` changed → coalesce
+    //    them into runs and patch (a partial upload).
+    const iw = frame.instanceWorld;
+    const dirty = frame.dirtySlots;
+    // trust the incremental patch only when the buffer already holds a valid
+    // full copy of THIS visible set — a fresh buffer, or a standalone evaluate()
+    // (query / camera framing) not paired with a render, desyncs it.
+    const canPatch = this.modelBufValid && frame.visibleCount === this.lastUploadedVisible;
+    if (frame.visibleCount === 0 || (frame.stats.frameChanged === 0 && canPatch)) {
+      // nothing to upload
+    } else if (frame.stats.listRebuilt === 0 && canPatch) {
+      // the buffer is already correct except for the changed matrix rows
+      if (dirty && dirty.length > 0) {
+        if (dirty.length * 3 >= frame.visibleCount) {
+          d.queue.writeBuffer(this.modelBuf, 0, iw.buffer, iw.byteOffset, frame.visibleCount * 64);
+          this.lastUploadBytes = frame.visibleCount * 64;
+        } else {
+          const slots = dirty.length > 1 ? Uint32Array.from(dirty).sort() : dirty;
+          let runStart = slots[0], prev = slots[0];
+          const flush = (end: number) => {
+            const bytes = (end - runStart + 1) * 64;
+            d.queue.writeBuffer(this.modelBuf, runStart * 64, iw.buffer, iw.byteOffset + runStart * 64, bytes);
+            this.lastUploadBytes += bytes;
+          };
+          for (let k = 1; k < slots.length; k++) {
+            if (slots[k] === prev + 1) { prev = slots[k]; continue; }
+            flush(prev); runStart = prev = slots[k];
+          }
+          flush(prev);
+        }
+      }
+    } else if (frame.visibleCount > 0) {
+      d.queue.writeBuffer(this.modelBuf, 0, iw.buffer, iw.byteOffset, frame.visibleCount * 64);
+      this.lastUploadBytes = frame.visibleCount * 64;
+      this.modelBufValid = true;
+      this.lastUploadedVisible = frame.visibleCount;
+    }
 
     const enc = d.createCommandEncoder();
     const pass = enc.beginRenderPass({
@@ -279,11 +401,15 @@ export class Renderer {
       ...(this.canTimestamp ? { timestampWrites: { querySet: this.qset!, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } } : {}),
     });
     pass.setBindGroup(0, this.g0);
-    pass.setVertexBuffer(0, this.vbuf);
-    pass.setIndexBuffer(this.ibuf, "uint32");
     this.drawCalls = 0;
+    if (this.posBuf && this.ibuf) {
+      pass.setVertexBuffer(0, this.posBuf);
+      pass.setVertexBuffer(1, this.nrmBuf);
+      pass.setVertexBuffer(2, this.uvBuf);
+      pass.setIndexBuffer(this.ibuf, "uint32");
+    }
     let curPipe: GPURenderPipeline | null = null;
-    for (const b of frame.batches) {
+    for (const b of (this.posBuf ? frame.batches : [])) {
       const s = this.slots.get(b.meshId);
       if (!s) continue;
       const matId = this.meshMaterial.get(b.meshId) ?? 0;

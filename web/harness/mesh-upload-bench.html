@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>mesh upload bench</title>
+<canvas id="c" width="640" height="360"></canvas>
+<pre id="log"></pre>
+<script type="module">
+import { Engine } from "../dist/engine.js";
+
+const engine = await Engine.create(document.getElementById("c"));
+const scene = engine.createScene();
+scene.camera.position = [0, 40, -120];
+scene.camera.target = [0, 0, 0];
+scene.camera.near = 1; scene.camera.far = 4000;
+
+let nextMesh = 0;
+
+// one small unique mesh (a jittered quad-ish strip) — cheap to make, unique
+// geometry so nothing dedups, ~40 verts / ~60 tris like a small building.
+function makeMesh(seed) {
+  const V = 40;
+  const positions = new Float32Array(V * 3);
+  const indices = new Uint32Array((V - 2) * 3);
+  let s = seed * 2654435761 % 2147483647;
+  const rnd = () => ((s = s * 16807 % 2147483647) / 2147483647);
+  for (let i = 0; i < V; i++) {
+    positions[i * 3] = (rnd() - 0.5) * 20 + (seed % 50) * 25;
+    positions[i * 3 + 1] = rnd() * 12;
+    positions[i * 3 + 2] = (rnd() - 0.5) * 20 + ((seed / 50) | 0) * 25;
+  }
+  for (let i = 0; i < V - 2; i++) { indices[i * 3] = i; indices[i * 3 + 1] = i + 1; indices[i * 3 + 2] = i + 2; }
+  return { positions, indices };
+}
+
+// add `n` new meshes + entities, then upload + render one frame; return ms split
+window.addBatch = (n) => {
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) {
+    const e = scene.createEntity();
+    e.setMesh(makeMesh(nextMesh++));
+  }
+  const tBuild = performance.now();
+  engine.uploadMeshes(scene);           // <-- the thing under test
+  const tUpload = performance.now();
+  engine.renderOnce();
+  const tRender = performance.now();
+  return {
+    total: scene.entityCount,
+    buildMs: +(tBuild - t0).toFixed(3),
+    uploadMs: +(tUpload - tBuild).toFixed(3),
+    renderMs: +(tRender - tUpload).toFixed(3),
+    geomKB: +((engine.renderer.lastGeomUploadBytes || 0) / 1024).toFixed(1),
+    geomTotalMB: +((engine.renderer.geomBytesTotal || 0) / 1048576).toFixed(2),
+  };
+};
+window.__ready = true;
+</script>

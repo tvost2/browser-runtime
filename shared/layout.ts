@@ -29,10 +29,11 @@ export const FLAG = {
 } as const;
 
 export const CullStrategy = {
-  Standard: 0,          // sphere reject, then 8-corner box reject (Babylon default)
+  Standard: 0,          // incremental linear cull — re-tests only movers when the camera is still
   BoundingSphereOnly: 1,
   None: 2,
-  Bvh: 3,              // traverse the spatial index — sub-linear; best for large mostly-static scenes
+  Bvh: 3,              // spatial-index traversal — best for a moving camera over a large scene
+  Auto: 4,             // per frame: Bvh while the camera moves over a big scene, else Standard (default)
 } as const;
 export type CullStrategy = (typeof CullStrategy)[keyof typeof CullStrategy];
 
@@ -62,6 +63,14 @@ export interface EvalStats {
   /** 1 = the spatial index was rebuilt this frame (CullStrategy.Bvh); 0 = refit or reused */
   bvhBuilds: number;
   bvhNodes: number;
+  /** per-stage cost of evaluate() in microseconds (steady_clock) */
+  transformUs: number;
+  cullUs: number;
+  listUs: number;
+  /** 1 = the render list was rebuilt from scratch this frame; 0 = matrix rows patched in place */
+  listRebuilt: number;
+  /** instance-buffer rows whose matrix changed (when listRebuilt === 0) — for a partial GPU upload */
+  dirtySlots: number;
 }
 
 /** Result of one World.evaluate() — all typed arrays are VIEWS over WASM/JS
@@ -73,5 +82,9 @@ export interface FrameResult {
   instanceWorld: Float32Array;  // [visibleCount*16] world matrices, batch-sorted
   instanceMeshId: Uint32Array;  // [visibleCount]
   batches: RenderBatch[];
+  /** when the render list was NOT rebuilt (stats.listRebuilt === 0): the
+   *  instanceWorld rows whose matrix changed — the renderer patches just those.
+   *  null when a full rebuild happened. */
+  dirtySlots: Uint32Array | null;
   stats: EvalStats;
 }

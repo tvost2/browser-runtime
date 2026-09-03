@@ -42,6 +42,28 @@ stays frozen; its benchmark results are not modified.
 - Fix: `World::resize()` now preserves entity data on a capacity grow (was
   zeroing it — latent corruption for scenes built one entity at a time).
 
+### Incremental rendering  (F-013)
+
+- **Incremental linear cull** — a still camera re-tests only the entities that
+  moved this frame (persistent `_visibleBit`); a moving camera does the full
+  re-test. **Incremental render list** — an unchanged visible set + batch layout
+  patches only the moved `instanceWorld` rows; `Renderer.render()` coalesces the
+  dirty slots and issues **partial `writeBuffer`** calls instead of re-uploading
+  the whole instance buffer.
+- **`CullStrategy.Auto`** — new default: `Bvh` while the camera moves over a
+  large scene, else the incremental linear cull. 250k entities: object motion
+  under a still camera **13 → 5 ms** (2.6×), moving camera **13.5 → 6.3 ms**,
+  static unchanged; instance-buffer upload **4 MB → ~19 KB/frame** at 1 % moving.
+- `EvalStats` gains `transformUs` / `cullUs` / `listUs` / `listRebuilt` /
+  `dirtySlots`. New: `test:render:patch` (browser partial-upload equivalence),
+  `bench:renderer`, `bench:renderer:gpu`.
+- Fixes: the depth texture now resizes with the canvas (a mismatch silently
+  dropped every frame → black screen); the partial-upload path is guarded
+  against a never-fully-uploaded instance buffer; `requestAdapter()` retries
+  without `powerPreference` and with a fallback adapter.
+- `npm run compare` — side-by-side Browser Runtime vs Babylon.js GLB viewer
+  (`web/harness/vitrine-compare/`).
+
 ## [0.1.0] — 2026-09-02 — Experimental baseline
 
 First reproducible, publishable baseline. **One hot path implemented**

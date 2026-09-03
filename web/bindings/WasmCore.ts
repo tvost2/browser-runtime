@@ -21,13 +21,16 @@ interface WasmWorld {
   localMinPtr(): number; localMaxPtr(): number;
   meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; dirtyPtr(): number; viewProjPtr(): number;
   markAllDirty(): void;
-  evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean): number;
+  evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean, meshLayoutDirty: boolean): number;
   visibleIdPtr(): number; instanceWorldPtr(): number; instanceMeshIdPtr(): number;
   batchesPtr(): number; batchCount(): number;
   worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
   sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
+  sTransformUs(): number; sCullUs(): number; sListUs(): number;
+  sListRebuilt(): number; sDirtySlots(): number; dirtySlotsPtr(): number;
+  markMeshLayoutDirty(): void;
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
   raycastT(): number;
   queryBox(minx: number, miny: number, minz: number, maxx: number, maxy: number, maxz: number): number;
@@ -58,6 +61,9 @@ export class WasmCore {
     const c = new WasmCore();
     c.mod = await loadEngineModule(wasmUrl) as unknown as EmModule;
     c.world = new c.mod.World();
+    // bind the component / viewProj views up front so they are never undefined —
+    // evaluate() may run (harness render loop) before the first setCount().
+    c.refreshComponentViews();
     c.initMs = performance.now() - t0;
     return c;
   }
@@ -103,7 +109,13 @@ export class WasmCore {
     C.flags = u32(w.flagsPtr(), cap * STRIDE.flags);
     C.dirty = new Uint8Array(m.HEAPU8.buffer, w.dirtyPtr(), cap);
     this.viewProj = f32(w.viewProjPtr(), 16);
+    this._viewsBuf = m.HEAPF32.buffer;
   }
+
+  /** ALLOW_MEMORY_GROWTH swaps the heap ArrayBuffer (e.g. a big GLB decode
+   *  between two evaluate()s); every cached view detaches. Cheap identity check. */
+  private _viewsBuf: ArrayBufferLike | null = null;
+  private _syncViews() { if (this.mod.HEAPF32.buffer !== this._viewsBuf) this.refreshComponentViews(); }
 
   /** All-entity world-space AABB (min, max). Views over WASM memory; valid until
    *  the next evaluate()/resize(). For the spatial index / physics sync / debug. */
@@ -115,17 +127,18 @@ export class WasmCore {
     };
   }
 
-  writeViewProj(m16: Float32Array) { this.viewProj.set(m16); }
+  writeViewProj(m16: Float32Array) { this._syncViews(); this.viewProj.set(m16); }
 
   /** One boundary crossing. Returns views over WASM memory — valid until next call. */
   evaluate(strategy: CullStrategy = CullStrategy.Standard, sortByMesh = true): FrameResult {
     const w = this.world, m = this.mod;
-    const bufBefore = m.HEAPU8.buffer;
-    const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty);
+    this._syncViews();
+    const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty, this._meshLayoutDirty);
     this._hierarchyDirty = false;
-    // evaluate() can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
+    this._meshLayoutDirty = false;
+    // evaluate() itself can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
     // swaps every HEAP* and detaches the cached component / viewProj views.
-    if (m.HEAPU8.buffer !== bufBefore) this.refreshComponentViews();
+    this._syncViews();
 
     const bc = w.batchCount();
     const braw = new Uint32Array(m.HEAPU32.buffer, w.batchesPtr(), bc * STRIDE.batch);
@@ -139,12 +152,15 @@ export class WasmCore {
       instanceWorld: new Float32Array(m.HEAPF32.buffer, w.instanceWorldPtr(), visible * STRIDE.worldMatrix),
       instanceMeshId: new Uint32Array(m.HEAPU32.buffer, w.instanceMeshIdPtr(), visible),
       batches,
+      dirtySlots: w.sListRebuilt() ? null : new Uint32Array(m.HEAPU32.buffer, w.dirtySlotsPtr(), w.sDirtySlots()),
       stats: {
         visible: w.sVisible(), traversed: w.sTraversed(),
         culledDisabled: w.sCulledDisabled(), culledFrustum: w.sCulledFrustum(),
         batches: w.sBatches(), hierarchyRebuilds: w.sHierRebuilds(),
         transformsRecomputed: w.sTransformsRecomputed(), frameChanged: w.sFrameChanged(),
         bvhBuilds: w.sBvhBuilds(), bvhNodes: w.sBvhNodes(),
+        transformUs: w.sTransformUs(), cullUs: w.sCullUs(), listUs: w.sListUs(),
+        listRebuilt: w.sListRebuilt(), dirtySlots: w.sDirtySlots(),
       },
     };
   }
@@ -152,6 +168,12 @@ export class WasmCore {
   /** Mark every entity's transform dirty — forces a full recompute next
    *  evaluate(). Use after a bulk write that bypassed the Transform setters. */
   markAllDirty() { this.world.markAllDirty(); }
+
+  private _meshLayoutDirty = false;
+  /** Force the next evaluate() to rebuild the render list from scratch (a meshId
+   *  or visibility flag changed — the batch layout may differ even if the
+   *  visible set doesn't). JS-side flag — zero WASM calls; rides into evaluate(). */
+  markMeshLayoutDirty() { this._meshLayoutDirty = true; }
 
   /** Nearest entity whose world-space AABB the ray hits (BVH broadphase +
    *  precise slab test). `dir` need not be normalised. Returns the entity id and

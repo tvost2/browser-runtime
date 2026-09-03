@@ -78,8 +78,16 @@ time. Analyzer-ranked candidates (`npm run analyze`, all ESTIMATED — not measu
       a static 250k-entity frame went 90 ms → 1.7 ms (~50×; ~680× Babylon-frozen
       at 50k). `bcpp::Bvh` + `raycast()` / `queryBox()`; `CullStrategy.Bvh`
       opt-in. `test:equivalence` 6/6, `test:spatial` 3/3.
-- [ ] incremental render list (patch changed instance matrices; persistent BVH
-      visibility) — the O(n) cull + O(visible) list-build now dominate a moving frame
+- [x] **incremental rendering — patch the cull + render list + GPU upload**
+      ([investigations/incremental-renderer.md](investigations/incremental-renderer.md) ·
+      [FINDINGS F-013](FINDINGS.md#f-013)). Incremental linear cull (re-test only
+      movers when the camera is still), incremental render list + dirty-slot
+      partial `writeBuffer`, `CullStrategy.Auto` (new default). 250k entities:
+      object motion under a still camera 13 → 5 ms (2.6×), moving camera
+      13.5 → 6.3 ms; instance upload 4 MB → ~19 KB/frame at 1 % moving.
+      `test:equivalence` 6/6, `test:render:patch` 5/5.
+- [ ] instancing / thin instances (the per-instance slot map from F-013 is the base)
+- [ ] dirty-list transform pass + persistent per-node BVH visibility
 - [ ] skeleton / bone matrices
 - [ ] CPU particle update
 - [ ] geometry processing (`VertexData` transforms, merge, subdivide)
