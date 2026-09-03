@@ -74,6 +74,9 @@ export class Renderer {
   gpuMs = 0;
 
   private ctx!: GPUCanvasContext;
+  private canvas!: HTMLCanvasElement;
+  private depthW = 0;
+  private depthH = 0;
   private format!: GPUTextureFormat;
   private pipeline!: GPURenderPipeline;
   private pipelineNoCull!: GPURenderPipeline;
@@ -109,6 +112,7 @@ export class Renderer {
       console.error("WebGPU:", (e as GPUUncapturedErrorEvent).error.message);
       (r as unknown as { lastError?: string }).lastError = (e as GPUUncapturedErrorEvent).error.message;
     });
+    r.canvas = canvas;
     r.ctx = canvas.getContext("webgpu")!;
     r.format = navigator.gpu.getPreferredCanvasFormat();
     r.ctx.configure({ device: r.device, format: r.format, alphaMode: "opaque" });
@@ -166,8 +170,11 @@ export class Renderer {
   }
 
   resize(w: number, h: number) {
+    w = Math.max(1, w | 0); h = Math.max(1, h | 0);
+    if (w === this.depthW && h === this.depthH && this.depth) return;
     this.depth?.destroy();
     this.depth = this.device.createTexture({ size: [w, h], format: "depth24plus", usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    this.depthW = w; this.depthH = h;
   }
 
   dispose() {
@@ -247,10 +254,14 @@ export class Renderer {
     this.device.queue.writeBuffer(this.ibuf, 0, idx);
   }
 
+  private modelBufValid = false;    // false → the instance buffer holds no valid data yet (force a full upload)
+  private lastUploadedVisible = -1;
+
   private ensureModelBuffer(instances: number) {
     if (instances <= this.modelCapacity && this.modelBuf) return;
     this.modelCapacity = Math.max(instances, Math.ceil(this.modelCapacity * 1.5), 1024);
     this.modelBuf?.destroy();
+    this.modelBufValid = false;
     this.modelBuf = this.device.createBuffer({ size: this.modelCapacity * 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.g0 = this.device.createBindGroup({
       layout: this.g0Layout,
@@ -266,6 +277,11 @@ export class Renderer {
 
   render(viewProj: Float32Array, frame: FrameResult) {
     const d = this.device;
+    // the canvas colour texture auto-tracks canvas.width/height; keep the depth
+    // texture in lock-step or beginRenderPass rejects the size mismatch and the
+    // frame is silently dropped (black screen).
+    if (this.canvas && (this.canvas.width !== this.depthW || this.canvas.height !== this.depthH))
+      this.resize(this.canvas.width, this.canvas.height);
     d.queue.writeBuffer(this.camBuf, 0, viewProj);
     this.ensureModelBuffer(Math.max(1, frame.visibleCount));
     this.lastUploadBytes = 0;
@@ -278,9 +294,13 @@ export class Renderer {
     //    them into runs and patch (a partial upload).
     const iw = frame.instanceWorld;
     const dirty = frame.dirtySlots;
-    if (frame.visibleCount === 0 || frame.stats.frameChanged === 0) {
+    // trust the incremental patch only when the buffer already holds a valid
+    // full copy of THIS visible set — a fresh buffer, or a standalone evaluate()
+    // (query / camera framing) not paired with a render, desyncs it.
+    const canPatch = this.modelBufValid && frame.visibleCount === this.lastUploadedVisible;
+    if (frame.visibleCount === 0 || (frame.stats.frameChanged === 0 && canPatch)) {
       // nothing to upload
-    } else if (frame.stats.listRebuilt === 0) {
+    } else if (frame.stats.listRebuilt === 0 && canPatch) {
       // the buffer is already correct except for the changed matrix rows
       if (dirty && dirty.length > 0) {
         if (dirty.length * 3 >= frame.visibleCount) {
@@ -301,9 +321,11 @@ export class Renderer {
           flush(prev);
         }
       }
-    } else {
+    } else if (frame.visibleCount > 0) {
       d.queue.writeBuffer(this.modelBuf, 0, iw.buffer, iw.byteOffset, frame.visibleCount * 64);
       this.lastUploadBytes = frame.visibleCount * 64;
+      this.modelBufValid = true;
+      this.lastUploadedVisible = frame.visibleCount;
     }
 
     const enc = d.createCommandEncoder();
