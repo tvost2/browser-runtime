@@ -15,11 +15,12 @@ export class Camera {
   aspect = 1;
 
   /** Frame a scene of half-extent `radius` around `target`. Picks near/far that
-   *  keep hyperbolic depth precision usable (far/near ≈ 60–130) — the F-009
-   *  black-screen bug was a far/near of ~40000. */
+   *  keep hyperbolic depth precision usable (far/near ≈ 200) while leaving room
+   *  for an orbit camera at a few × radius — the F-009 black-screen bug was a
+   *  far/near of ~40000. */
   fit(radius: number) {
-    this.near = Math.max(0.05, radius * 0.03);
-    this.far = radius * 4;
+    this.near = Math.max(0.02, radius * 0.05);
+    this.far = radius * 10;
     return this;
   }
 
