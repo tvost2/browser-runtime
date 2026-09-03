@@ -47,12 +47,26 @@ compute-dispatch overhead (a WARP artifact, but the pattern holds) outweighs
 its per-frame-upload saving — `CullStrategy.Gpu` is for *many* entities, and
 merge removes them. Merge + Standard is the combination for this workload.
 
+### Pick buffer — individual objects stay selectable after the merge
+
+`Renderer.pickAt(x, y)` (→ `Engine.pickAt`) re-draws the last `render()` list
+with a pick pipeline that writes each fragment's per-vertex id (a 4th SoA arena
+buffer, `r32uint`, flat-interpolated) into an `r32uint` target, then
+`copyTextureToBuffer` reads back the one texel under the cursor. Depth-tested,
+so the front-most surface wins — occlusion is respected. `mergeMeshes` stamps
+every vertex with its source item id, so a merged cell resolves the individual
+building; a mesh with no ids reads back `0xffffffff` → `-1`.
+
+Uses the CPU render path's instance buffer (works with `CullStrategy.Auto` /
+`Standard` — the pairing for merged scenes; `Gpu` mode needs a standard-path
+frame first). `bench:chunk-merge` projects 70 building centroids to screen and
+picks: **68/70 resolve to a building, 61 exact** — the 7 non-exact are a nearer
+building occluding at that pixel (correct), the 2 misses are screen-edge.
+
 ### Next
-- **pick buffer** — a render pass writing the per-vertex id to an `r32uint`
-  target + `pickAt(x, y)` readback, so individual buildings stay selectable
-  after the merge.
 - wire into the Uberlândia twin (`groupByCell` over building centroids,
-  re-merge a cell when its buildings stream in).
+  re-merge a cell when its buildings stream in; `pickAt` on click for the
+  building info panel).
 
 ---
 
