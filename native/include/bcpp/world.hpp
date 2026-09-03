@@ -35,6 +35,8 @@ struct EvalStats {
     uint32_t visible = 0;
     uint32_t batches = 0;
     uint32_t hierarchyRebuilds = 0;
+    uint32_t transformsRecomputed = 0;  // entities whose world matrix was (re)computed this frame
+    uint32_t frameChanged = 1;          // 0 = nothing moved AND camera unchanged → render list reused
 };
 
 struct Batch { uint32_t meshId; uint32_t firstInstance; uint32_t instanceCount; };
@@ -53,10 +55,13 @@ public:
     std::vector<uint32_t> meshId;
     std::vector<uint32_t> materialId;
     std::vector<uint32_t> flags;
+    std::vector<uint8_t>  dirty;        // 1 = local transform changed since last evaluate() (JS writes this)
 
-    // ---- derived, rewritten each evaluate() ----
+    // ---- derived, persistent; recomputed only for dirty subtrees ----
     std::vector<Mat4>     world;
     std::vector<Vec4>     worldSphere;  // xyz center + w radius
+    std::vector<Vec3>     worldMin;     // world-space AABB (persistent — used by the spatial index)
+    std::vector<Vec3>     worldMax;
 
     // ---- render list output ----
     std::vector<uint32_t> visibleId;      // entity slots, render order
@@ -66,22 +71,31 @@ public:
 
     EvalStats stats{};
 
+    // Grow the SoA storage to capacity `n`, PRESERVING existing entity data and
+    // default-initialising only the new [old, n) slots. (Called by JS when the
+    // live count outgrows capacity; scenes are built incrementally.)
     void resize(uint32_t n) {
+        const uint32_t old = static_cast<uint32_t>(localPos.size());
+        if (n <= old) { count = n; _hierarchyDirty = true; return; }
         count = n;
-        localPos.assign(n, {});
-        localRot.assign(n, {0, 0, 0, 1});
-        localScale.assign(n, {1, 1, 1});
-        parent.assign(n, -1);
-        localMin.assign(n, {-0.5f, -0.5f, -0.5f});
-        localMax.assign(n, {0.5f, 0.5f, 0.5f});
-        meshId.assign(n, 0);
-        materialId.assign(n, 0);
-        flags.assign(n, F_ENABLED | F_VISIBLE);
-        world.assign(n, Mat4::identity());
-        worldSphere.assign(n, {});
-        _order.assign(n, 0);
-        _depth.assign(n, 0);
-        for (uint32_t i = 0; i < n; ++i) _order[i] = i;
+        localPos.resize(n);
+        localRot.resize(n, {0, 0, 0, 1});
+        localScale.resize(n, {1, 1, 1});
+        parent.resize(n, -1);
+        localMin.resize(n, {-0.5f, -0.5f, -0.5f});
+        localMax.resize(n, {0.5f, 0.5f, 0.5f});
+        meshId.resize(n, 0);
+        materialId.resize(n, 0);
+        flags.resize(n, F_ENABLED | F_VISIBLE);
+        dirty.resize(n, 1);
+        world.resize(n, Mat4::identity());
+        worldSphere.resize(n, {});
+        worldMin.resize(n, {-0.5f, -0.5f, -0.5f});
+        worldMax.resize(n, {0.5f, 0.5f, 0.5f});
+        _order.resize(n);
+        _depth.resize(n, 0);
+        _recomputed.resize(n, 0);
+        for (uint32_t i = old; i < n; ++i) _order[i] = i;
         _hierarchyDirty = true;
         visibleId.reserve(n);
         instanceWorld.reserve(n);
@@ -90,28 +104,40 @@ public:
         _sortKeys.reserve(n);
     }
 
-    void setCount(uint32_t n) { count = n; _hierarchyDirty = true; }
+    void setCount(uint32_t n) {
+        // entities that just came into existence need a first world-matrix compute
+        if (n > count) for (uint32_t i = count; i < n && i < dirty.size(); ++i) dirty[i] = 1;
+        count = n;
+        _hierarchyDirty = true;
+    }
     void markHierarchyDirty() { _hierarchyDirty = true; }
+    void markDirty(uint32_t i) { if (i < dirty.size()) dirty[i] = 1; }
+    void markAllDirty() { std::fill(dirty.begin(), dirty.begin() + std::min<size_t>(count, dirty.size()), 1); }
 
-    // One per-frame call.
+    // One per-frame call. Transforms are recomputed only for entities whose local
+    // transform changed (JS sets dirty[i]) or whose ancestor moved — the topo
+    // order lets a single forward pass propagate that. Culling still visits every
+    // entity (the camera usually moves) but that test is cheap; the O(n)
+    // transform+refit cost is now paid only for what actually moved.
     void evaluate(const Mat4& viewProj, CullStrategy strat, bool sortByMesh) {
+        const uint32_t prevVisible = stats.visible;
         stats = EvalStats{};
         stats.entities = count;
         if (_hierarchyDirty) { rebuildOrder(); stats.hierarchyRebuilds = 1; }
 
-        const Frustum fr = Frustum::fromViewProj(viewProj);
-        visibleId.clear();
-        instanceWorld.clear();
-        instanceMeshId.clear();
-        batches.clear();
+        const bool camMoved = _cameraChanged(viewProj);
+        const bool structChanged = _hierarchyDirty || count != _prevCount;
 
-        // pass 1: transform propagation + bounds refit + cull, in topo order
+        // --- transform pass: only dirty subtrees ---
+        _recomputed.assign(count, 0);
+        uint32_t recomputed = 0;
         for (uint32_t k = 0; k < count; ++k) {
             const uint32_t i = _order[k];
-            stats.traversed++;
+            const int32_t p = parent[i];
+            const bool needs = structChanged || dirty[i] || (p >= 0 && p < (int32_t)count && _recomputed[p]);
+            if (!needs) continue;
 
             const Mat4 local = Mat4::compose(localScale[i], localRot[i].normalized(), localPos[i]);
-            const int32_t p = parent[i];
             world[i] = (p < 0) ? local : Mat4::multiply(local, world[p]);
 
             const Vec3 lo = localMin[i], hi = localMax[i];
@@ -122,19 +148,45 @@ public:
                 wmin = Vec3::min(wmin, w);
                 wmax = Vec3::max(wmax, w);
             }
+            worldMin[i] = wmin; worldMax[i] = wmax;
             const Vec3 center = (wmin + wmax) * 0.5f;
             const f32 radius = ((wmax - wmin) * 0.5f).length();
             worldSphere[i] = {center.x, center.y, center.z, radius};
 
+            _recomputed[i] = 1;
+            recomputed++;
+        }
+        stats.transformsRecomputed = recomputed;
+        std::fill(dirty.begin(), dirty.begin() + std::min<size_t>(count, dirty.size()), 0);
+        _hierarchyDirty = false;
+        _prevCount = count;
+
+        // --- fast path: nothing moved and the camera is unchanged → reuse last
+        //     frame's render list verbatim (renderer can skip the GPU re-upload) ---
+        if (recomputed == 0 && !camMoved && !structChanged) {
+            stats.frameChanged = 0;
+            stats.visible = prevVisible;
+            stats.batches = static_cast<uint32_t>(batches.size());
+            stats.traversed = 0;
+            return;
+        }
+
+        // --- cull pass: visits every entity, cheap per-entity ---
+        const Frustum fr = Frustum::fromViewProj(viewProj);
+        visibleId.clear();
+        for (uint32_t k = 0; k < count; ++k) {
+            const uint32_t i = _order[k];
+            stats.traversed++;
             const uint32_t fl = flags[i];
             if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { stats.culledDisabled++; continue; }
-
             if (strat != CullStrategy::None && !(fl & F_ALWAYS_ACTIVE)) {
+                const Vec4 s = worldSphere[i];
+                const Vec3 center{s.x, s.y, s.z};
                 bool inside = true;
                 for (int pl = 0; pl < 6; ++pl)
-                    if (fr.planes[pl].dotCoordinate(center) <= -radius) { inside = false; break; }
+                    if (fr.planes[pl].dotCoordinate(center) <= -s.w) { inside = false; break; }
                 if (inside && strat == CullStrategy::Standard)
-                    inside = boxInFrustum(fr, wmin, wmax);
+                    inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
                 if (!inside) { stats.culledFrustum++; continue; }
             }
             visibleId.push_back(i);
@@ -142,6 +194,9 @@ public:
         stats.visible = static_cast<uint32_t>(visibleId.size());
 
         // pass 2: build the batched render list
+        instanceWorld.clear();
+        instanceMeshId.clear();
+        batches.clear();
         if (sortByMesh) buildSortedBatches();
         else            buildRunBatches();
         stats.batches = static_cast<uint32_t>(batches.size());
@@ -162,7 +217,19 @@ private:
     std::vector<uint32_t> _order;
     std::vector<int32_t>  _depth;
     std::vector<uint64_t> _sortKeys;
+    std::vector<uint8_t>  _recomputed;
     bool _hierarchyDirty = true;
+    uint32_t _prevCount = 0;
+    Mat4 _lastViewProj{};
+    bool _hasLastViewProj = false;
+
+    bool _cameraChanged(const Mat4& vp) {
+        bool same = _hasLastViewProj;
+        for (int i = 0; i < 16 && same; ++i) same = (_lastViewProj.m[i] == vp.m[i]);
+        _lastViewProj = vp;
+        _hasLastViewProj = true;
+        return !same;
+    }
 
     int32_t computeDepth(uint32_t i) {
         if (_depth[i] >= 0) return _depth[i];

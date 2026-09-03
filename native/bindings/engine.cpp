@@ -34,7 +34,10 @@ struct WasmWorld {
     int meshIdPtr()   { return P(w.meshId.data()); }     // u32 x count
     int materialIdPtr(){ return P(w.materialId.data()); }// u32 x count
     int flagsPtr()    { return P(w.flags.data()); }      // u32 x count
+    int dirtyPtr()    { return P(w.dirty.data()); }      // u8 x count — JS sets 1 when a local transform changes
     int viewProjPtr() { return P(viewProj); }            // f32 x16
+
+    void markAllDirty() { w.markAllDirty(); }
 
     // one boundary crossing per frame. `hierarchyDirty` is tracked JS-side so
     // per-entity setParent() calls during scene build cost zero crossings.
@@ -54,6 +57,8 @@ struct WasmWorld {
     uint32_t batchCount()   { return (uint32_t)w.batches.size(); }
     int worldMatricesPtr()  { return P(w.world.data()); }            // f32 x16 x count (ALL entities)
     int worldSpherePtr()    { return P(w.worldSphere.data()); }      // f32 x4 x count
+    int worldMinPtr()       { return P(w.worldMin.data()); }         // f32 x3 x count
+    int worldMaxPtr()       { return P(w.worldMax.data()); }         // f32 x3 x count
 
     // stats
     uint32_t sVisible()       { return w.stats.visible; }
@@ -62,6 +67,8 @@ struct WasmWorld {
     uint32_t sCulledFrustum() { return w.stats.culledFrustum; }
     uint32_t sBatches()       { return w.stats.batches; }
     uint32_t sHierRebuilds()  { return w.stats.hierarchyRebuilds; }
+    uint32_t sTransformsRecomputed() { return w.stats.transformsRecomputed; }
+    uint32_t sFrameChanged() { return w.stats.frameChanged; }
 };
 
 } // namespace
@@ -80,6 +87,8 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("meshIdPtr", &WasmWorld::meshIdPtr)
         .function("materialIdPtr", &WasmWorld::materialIdPtr)
         .function("flagsPtr", &WasmWorld::flagsPtr)
+        .function("dirtyPtr", &WasmWorld::dirtyPtr)
+        .function("markAllDirty", &WasmWorld::markAllDirty)
         .function("viewProjPtr", &WasmWorld::viewProjPtr)
         .function("evaluate", &WasmWorld::evaluate)
         .function("visibleIdPtr", &WasmWorld::visibleIdPtr)
@@ -89,11 +98,15 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("batchCount", &WasmWorld::batchCount)
         .function("worldMatricesPtr", &WasmWorld::worldMatricesPtr)
         .function("worldSpherePtr", &WasmWorld::worldSpherePtr)
+        .function("worldMinPtr", &WasmWorld::worldMinPtr)
+        .function("worldMaxPtr", &WasmWorld::worldMaxPtr)
         .function("sVisible", &WasmWorld::sVisible)
         .function("sTraversed", &WasmWorld::sTraversed)
         .function("sCulledDisabled", &WasmWorld::sCulledDisabled)
         .function("sCulledFrustum", &WasmWorld::sCulledFrustum)
         .function("sBatches", &WasmWorld::sBatches)
-        .function("sHierRebuilds", &WasmWorld::sHierRebuilds);
+        .function("sHierRebuilds", &WasmWorld::sHierRebuilds)
+        .function("sTransformsRecomputed", &WasmWorld::sTransformsRecomputed)
+        .function("sFrameChanged", &WasmWorld::sFrameChanged);
 }
 #endif

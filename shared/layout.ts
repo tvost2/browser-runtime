@@ -35,6 +35,12 @@ export const CullStrategy = {
 } as const;
 export type CullStrategy = (typeof CullStrategy)[keyof typeof CullStrategy];
 
+export const STRIDE_EXTRA = {
+  dirty: 1,       // u8 — 1 = local transform changed since last evaluate()
+  worldMin: 3,    // f32
+  worldMax: 3,    // f32
+} as const;
+
 export interface RenderBatch {
   meshId: number;
   firstInstance: number;
@@ -48,6 +54,10 @@ export interface EvalStats {
   culledFrustum: number;
   batches: number;
   hierarchyRebuilds: number;
+  /** entities whose world matrix was (re)computed this frame — 0 = fully static frame */
+  transformsRecomputed: number;
+  /** 0 = nothing moved and the camera is unchanged; the render list was reused verbatim */
+  frameChanged: number;
 }
 
 /** Result of one World.evaluate() — all typed arrays are VIEWS over WASM/JS
