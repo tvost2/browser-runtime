@@ -43,7 +43,7 @@ async function getBabylon() {
 const server = createServer(async (req, res) => {
   try {
     const url = decodeURIComponent(req.url.split("?")[0]);
-    const send = (body, type, code = 200) => { res.writeHead(code, { "content-type": type, "cross-origin-opener-policy": "same-origin", "cross-origin-embedder-policy": "require-corp" }); res.end(body); };
+    const send = (body, type, code = 200) => { res.writeHead(code, { "content-type": type }); res.end(body); };
 
     if (url === "/" || url === "/index.html") return send(await readFile(join(here, "vitrine-compare.html")), "text/html");
     if (url === "/vitrine-compare.mjs") return send(await readFile(join(here, "vitrine-compare.mjs")), "text/javascript");

@@ -44,9 +44,11 @@ sizeCanvas(cL); sizeCanvas(cR);
 // ================= LEFT — Browser Runtime =================
 const rt = { engine: null, scene: null };
 async function loadRuntime(url) {
-  if (!navigator.gpu) throw new Error("WebGPU not available — use Chrome/Edge 113+ (or enable chrome://flags/#enable-unsafe-webgpu)");
-  if (!(await navigator.gpu.requestAdapter().catch(() => null)) && !(await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null)))
-    throw new Error("navigator.gpu exists but no adapter — close other WebGPU tabs / update your GPU driver, then reload");
+  if (!navigator.gpu) throw new Error("WebGPU not available — needs Chrome/Edge 113+");
+  if (!(await navigator.gpu.requestAdapter().catch(() => null)) && !(await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }).catch(() => null))) {
+    const flag = location.href.includes("edge") || navigator.userAgent.includes("Edg") ? "edge://flags/#enable-unsafe-webgpu" : "chrome://flags/#enable-unsafe-webgpu";
+    throw new Error(`no WebGPU adapter on this machine (GPU too old / blocklisted). Fix: paste  ${flag}  in a new tab → set "Unsafe WebGPU Support" to Enabled → restart the browser → reload this page.  OR run  npm run compare  (opens a pre-flagged browser).`);
+  }
   $("sL").textContent = "loading…";
   if (rt.engine) { rt.engine.dispose(); rt.engine = null; }
   // canvas sized once at module load; the runtime engine binds its depth buffer to it
