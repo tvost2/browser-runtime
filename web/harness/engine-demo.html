@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>bcpp engine — live demo</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0c10; color: #cdd6e4; font: 12px ui-monospace, monospace; overflow: hidden; }
+  canvas { width: 100vw; height: 100vh; display: block; }
+  #hud { position: fixed; top: 10px; left: 10px; white-space: pre; background: #000a; padding: 10px 12px; border-radius: 8px; line-height: 1.5; }
+  #hud b { color: #8fd; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">loading WASM core…</div>
+<script type="module" src="./engine-demo.mjs"></script>
+</body>
+</html>
