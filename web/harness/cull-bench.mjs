@@ -10,9 +10,18 @@ import { Engine, box } from "../dist/engine.js";
 const qs = new URLSearchParams(location.search);
 const COUNT = Number(qs.get("count") || 100000);
 const STRAT = Number(qs.get("strategy") ?? 4);
+const NMESH = Math.max(1, Number(qs.get("meshes") || 1)); // distinct geometries → distinct draw buckets
 const STRAT_NAMES = ["Standard", "Sphere", "None", "Bvh", "Auto", "Gpu"];
 if (qs.get("scenario")) window.__scenario = qs.get("scenario");
 if (qs.get("moverRatio")) window.__moverRatio = Number(qs.get("moverRatio"));
+
+function jbox(seed) {
+  const b = box(1);
+  const p = b.positions.slice();
+  let s = (seed * 2654435761) >>> 0;
+  for (let i = 0; i < p.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; p[i] += (s / 2 ** 32 - 0.5) * 0.02; }
+  return { positions: p, indices: b.indices.slice() };
+}
 
 const canvas = document.getElementById("c");
 const hud = document.getElementById("hud");
@@ -22,11 +31,12 @@ const engine = await Engine.create(canvas);
 const scene = engine.createScene();
 scene.cullStrategy = STRAT;
 
-const mesh = box(1);
+const meshIds = [];
+for (let k = 0; k < NMESH; k++) meshIds.push(scene.registerMesh(NMESH === 1 ? box(1) : jbox(k + 1)));
 const R = ((s) => () => (s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32)(0xBEEF + COUNT);
 const spread = Math.cbrt(COUNT) * 30;
 scene.createEntities(COUNT, (e, i) => {
-  e.mesh = mesh;
+  e.setMesh(meshIds[i % NMESH]);
   e.transform.position.set((R() - 0.5) * spread, (R() - 0.5) * spread, (R() - 0.5) * spread);
   const s = 0.6 + R() * 1.2;
   e.transform.scaling.set(s, s, s);

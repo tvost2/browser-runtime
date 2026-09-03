@@ -105,7 +105,7 @@ fn args(@builtin(global_invocation_id) gid : vec3<u32>) {
   drawArgs[o + 1u] = atomicLoad(&bucketCount[b]);  // instanceCount
   drawArgs[o + 2u] = mi.y;                         // firstIndex
   drawArgs[o + 3u] = mi.z;                         // baseVertex
-  drawArgs[o + 4u] = bucketOffset[b];              // firstInstance
+  drawArgs[o + 4u] = 0u;                           // firstInstance — bucket base is a dynamic uniform instead
 }`;
 
 // render pipeline for GPU mode: world matrices are entity-indexed, the instance
@@ -115,6 +115,11 @@ struct Camera { viewProj : mat4x4<f32> };
 @group(0) @binding(0) var<uniform> camera : Camera;
 @group(0) @binding(1) var<storage, read> worldMats  : array<mat4x4<f32>>;  // entity-indexed
 @group(0) @binding(2) var<storage, read> visibleIds : array<u32>;
+// per-bucket base into visibleIds, set via a dynamic uniform offset each draw.
+// (drawIndexedIndirect's firstInstance is NOT added to instance_index on some
+// backends — WARP/older Dawn — so we can't rely on it.)
+struct Bucket { base : u32 };
+@group(0) @binding(3) var<uniform> bucket : Bucket;
 
 struct Material { baseColor : vec4<f32>, flags : vec4<f32> };
 @group(1) @binding(0) var<uniform> mat : Material;
@@ -125,7 +130,7 @@ struct VSOut { @builtin(position) clip : vec4<f32>, @location(0) n : vec3<f32>, 
 
 @vertex fn vs(@location(0) p : vec3<f32>, @location(1) nrm : vec3<f32>,
               @location(2) uv : vec2<f32>, @builtin(instance_index) ii : u32) -> VSOut {
-  let world = worldMats[visibleIds[ii]];
+  let world = worldMats[visibleIds[bucket.base + ii]];
   var o : VSOut;
   o.clip = camera.viewProj * (world * vec4<f32>(p, 1.0));
   o.n = normalize((world * vec4<f32>(nrm, 0.0)).xyz);
@@ -241,6 +246,8 @@ export class Renderer {
   private gBucketCnt?: GPUBuffer;
   private gMeshInfo?: GPUBuffer;
   private gDrawArgs?: GPUBuffer;
+  private gBucketBase?: GPUBuffer;   // per-bucket base into visibleIds, one 256-aligned u32 per bucket (dynamic uniform offset)
+  private _bucketOffCpu = new Uint32Array(0);
   private gCullU?: GPUBuffer;
   private gCullBind?: GPUBindGroup;
   private g0Gpu?: GPUBindGroup;
@@ -351,6 +358,7 @@ export class Renderer {
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: bufRO },
         { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: bufRO },
+        { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform", hasDynamicOffset: true } },
       ],
     });
     const gmod = d.createShaderModule({ code: GPU_WGSL });
@@ -382,7 +390,7 @@ export class Renderer {
 
   dispose() {
     for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead,
-      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gCullU, this._bucketCntRead]) b?.destroy();
+      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gCullU, this._bucketCntRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
     this.device.destroy();
@@ -647,11 +655,12 @@ export class Renderer {
     }
     if (gpu.numBuckets > this.gBucketCap) {
       const cap = Math.max(gpu.numBuckets, this.gBucketCap * 2, 64);
-      for (const b of [this.gBucketOff, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this._bucketCntRead]) b?.destroy();
+      for (const b of [this.gBucketOff, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this._bucketCntRead]) b?.destroy();
       this.gBucketOff = d.createBuffer({ size: (cap + 1) * 4, usage: S | C });
       this.gBucketCnt = d.createBuffer({ size: cap * 4, usage: S | C | R });
       this.gMeshInfo = d.createBuffer({ size: cap * 16, usage: S | C });
       this.gDrawArgs = d.createBuffer({ size: cap * 20, usage: GPUBufferUsage.INDIRECT | S | R });
+      this.gBucketBase = d.createBuffer({ size: cap * 256, usage: GPUBufferUsage.UNIFORM | C });
       this._bucketCntRead = d.createBuffer({ size: cap * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
       this._skipEmptyValid = false;
       this.gBucketCap = cap;
@@ -661,9 +670,15 @@ export class Renderer {
     const layoutUp = gpu.layoutChanged || rebind;
     if (layoutUp) {
       this.gBucketMesh = gpu.bucketMesh.slice(0, gpu.numBuckets);
-      d.queue.writeBuffer(this.gEntBucket!, 0, gpu.entityBucket.buffer, gpu.entityBucket.byteOffset, gpu.count * 4);
-      d.queue.writeBuffer(this.gBucketOff!, 0, gpu.bucketOffset.buffer, gpu.bucketOffset.byteOffset, (gpu.numBuckets + 1) * 4);
-      d.queue.writeBuffer(this.gFlags!, 0, gpu.flags.buffer, gpu.flags.byteOffset, gpu.count * 4);
+      const eb = gpu.entityBucket.slice(), bo = gpu.bucketOffset.slice(), fl = gpu.flags.slice();
+      d.queue.writeBuffer(this.gEntBucket!, 0, eb);
+      d.queue.writeBuffer(this.gBucketOff!, 0, bo);
+      d.queue.writeBuffer(this.gFlags!, 0, fl);
+      // per-bucket base into visibleIds, one value per 256-byte aligned slot
+      this._bucketOffCpu = bo;
+      const base = new Uint32Array(gpu.numBuckets * 64); // 64 u32 = 256 B stride
+      for (let b = 0; b < gpu.numBuckets; b++) base[b * 64] = bo[b];
+      d.queue.writeBuffer(this.gBucketBase!, 0, base);
     }
     // per-bucket mesh geometry info — refresh when the layout changed OR the mesh
     // arena grew (a bucket's slot may not have existed when the layout was built).
@@ -699,6 +714,7 @@ export class Renderer {
           { binding: 0, resource: { buffer: this.camBuf } },
           { binding: 1, resource: { buffer: this.gWorldMat! } },
           { binding: 2, resource: { buffer: this.gVisible! } },
+          { binding: 3, resource: { buffer: this.gBucketBase!, size: 16 } },
         ],
       });
     }
@@ -786,7 +802,6 @@ export class Renderer {
       depthStencilAttachment: { view: this.depth.createView(), depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "store" },
       ...(this.canTimestamp ? { timestampWrites: { querySet: this.qset!, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } } : {}),
     });
-    pass.setBindGroup(0, this.g0Gpu!);
     pass.setVertexBuffer(0, this.posBuf);
     pass.setVertexBuffer(1, this.nrmBuf);
     pass.setVertexBuffer(2, this.uvBuf);
@@ -803,6 +818,7 @@ export class Renderer {
       const m = this.materials.get(matId) ?? this.materials.get(0)!;
       const pipe = m.doubleSided ? this.pipelineGpuNoCull! : this.pipelineGpu!;
       if (pipe !== curPipe) { pass.setPipeline(pipe); curPipe = pipe; }
+      pass.setBindGroup(0, this.g0Gpu!, [b * 256]); // this bucket's base into visibleIds
       pass.setBindGroup(1, m.g1);
       pass.drawIndexedIndirect(this.gDrawArgs!, b * 20);
       this.drawCalls++;
@@ -864,7 +880,7 @@ export class Renderer {
     await visRead.mapAsync(GPUMapMode.READ);
     const vis = new Uint32Array(visRead.getMappedRange());
     for (let b = 0; b < nb; b++) {
-      const first = args[b * 5 + 4], cnt = args[b * 5 + 1];
+      const first = this._bucketOffCpu[b] ?? 0, cnt = args[b * 5 + 1];
       for (let k = 0; k < cnt; k++) out.push(vis[first + k]);
     }
     visRead.unmap(); visRead.destroy();

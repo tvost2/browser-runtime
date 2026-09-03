@@ -46,6 +46,17 @@ const SCEN = ["static", "camera"];
   const ok = eq.missing === 0 && frac < 0.002;
   console.log(`\n  equivalence (60k, moving camera): CPU ${eq.cpu} visible · GPU misses ${eq.missing} · GPU extra ${eq.extra} (${(frac * 100).toFixed(3)}%, boundary float noise, always over-draws)  ${ok ? "OK" : "FAIL"}`);
   if (!ok) process.exitCode = 1;
+
+  // many-bucket sanity: 2000 distinct meshes → 2000 draw buckets. Regression
+  // guard for the WARP firstInstance bug (fixed with a per-bucket dynamic uniform).
+  const mb = await browser.newPage({ viewport: { width: 1000, height: 600 } });
+  await mb.goto(`http://localhost:${port}/web/harness/cull-bench.html?count=20000&meshes=2000&strategy=5&scenario=camera`);
+  await mb.waitForFunction(() => window.__ready, { timeout: 30000 });
+  await mb.waitForTimeout(3500);
+  const nvis = await mb.evaluate(() => window.__bench.engine.renderer.readbackGpuVisible().then((r) => r.length));
+  await mb.close();
+  console.log(`  many-bucket (20k entities, 2000 meshes): GPU visible ${nvis}  ${nvis > 5000 ? "OK" : "FAIL"}`);
+  if (nvis <= 5000) process.exitCode = 1;
 }
 
 const results = [];
