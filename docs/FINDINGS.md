@@ -74,12 +74,36 @@ bucket's base into `visibleIds` is a per-draw **dynamic uniform-buffer offset**.
 The Uberlândia digital twin (`twin.mytheria.com.br`, ~3.7k unique meshes) now
 renders on `CullStrategy.Gpu` — HUD shows `matrizes p/ GPU 0 KB/frame`.
 
-### Not built — the design is in the code review
+### 3 — the transform pass on the GPU too (the endgame)
 
-- ring buffer for the instance-matrix buffer (removes any `writeBuffer` stall)
-- the endgame: **the transform pass itself on a compute shader**, with C++ as the
-  GPU work-planner (dirty list + indirect args in WASM) — per-frame CPU→GPU drops
-  to the camera + dirty TRS only.
+`CullStrategy.Gpu` now also composes world matrices on the GPU. A compute
+dispatch, per entity: compose local TRS → matrix, pointer-chase the parent chain
+(capped at 32) multiplying local matrices, refit the 8-corner world AABB, write
+the bounding sphere. The cull pass then reads those spheres. C++ `evaluate()` in
+Gpu mode computes **no matrices at all** — it only records which local transforms
+changed (so the renderer patches those 40-byte TRS rows) and keeps the bucket
+layout current. `worldMatrices()` / `raycast()` / `worldBounds()` are stale in
+Gpu mode until a non-Gpu `evaluate()` runs — documented.
+
+`bench:gpu-cull` (WARP, 150k entities):
+
+| scenario | Standard cpu | Gpu cpu | Standard upload | Gpu upload |
+|---|--:|--:|--:|--:|
+| camera-orbit | 58 ms | **20 ms** | 5.1 MB/frame | **0** |
+| transform 1 % moving | 45 ms | **29 ms** | 50 KB | 59 KB |
+| static | ~20 ms | ~18 ms | 0 | 0 (both WARP-submit-bound) |
+
+Equivalence (60k, moving camera): GPU misses **0** entities the CPU keeps,
+over-draws 0.058 % — the GPU-composed matrices match the CPU path (a wrong
+convention would scatter the visible set, not nudge its boundary). The Uberlândia
+twin renders on it: `eval(cena)` ~0.15 ms for 6.3k entities, 0 bytes of matrices
+per frame.
+
+### Not built
+
+- ring buffer for the local-TRS buffer (removes any `writeBuffer` stall)
+- C++ emitting a compact dirty *list* instead of a per-entity `_recomputed`
+  array (the O(n) copy is the last CPU cost in Gpu mode)
 
 ---
 
