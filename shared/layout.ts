@@ -59,6 +59,9 @@ export interface EvalStats {
   transformsRecomputed: number;
   /** 0 = nothing moved and the camera is unchanged; the render list was reused verbatim */
   frameChanged: number;
+  /** 1 = the spatial index was rebuilt this frame (CullStrategy.Bvh); 0 = refit or reused */
+  bvhBuilds: number;
+  bvhNodes: number;
 }
 
 /** Result of one World.evaluate() — all typed arrays are VIEWS over WASM/JS

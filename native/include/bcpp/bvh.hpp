@@ -16,6 +16,8 @@
 #include <vector>
 #include <cstdint>
 #include <cmath>
+#include <algorithm>
+#include <functional>
 
 namespace bcpp {
 
@@ -30,7 +32,9 @@ static_assert(sizeof(BvhNode) == 32, "BvhNode must be 32 bytes");
 class Bvh {
 public:
     std::vector<BvhNode> nodes;
-    std::vector<uint32_t> prim;      // entity slots, reordered
+    std::vector<uint32_t> prim;         // entity slots, reordered
+    std::vector<uint32_t> entityLeaf;   // entity slot -> index of the leaf node holding it
+    std::vector<uint32_t> nodeParent;   // node -> parent node (root -> itself)
     uint32_t nodeCount = 0;
     uint32_t leafSize = 8;
 
@@ -52,9 +56,13 @@ public:
             _cz[i] = 0.5f * (wmin[i].z + wmax[i].z);
         }
 
+        nodeParent.assign(nodes.size(), 0);
+        entityLeaf.assign(n, 0);
+
         const uint32_t root = nodeCount++;
         nodes[root].leftFirst = 0;
         nodes[root].count = n;
+        nodeParent[root] = root;
         computeBounds(root, wmin, wmax);
 
         // explicit work stack of node indices to try to split
@@ -85,12 +93,51 @@ public:
             const uint32_t li = nodeCount++, ri = nodeCount++;
             nodes[li].leftFirst = first;             nodes[li].count = leftCount;
             nodes[ri].leftFirst = first + leftCount; nodes[ri].count = cnt - leftCount;
+            nodeParent[li] = ni; nodeParent[ri] = ni;
             node.leftFirst = li;
             node.count = 0;
             computeBounds(li, wmin, wmax);
             computeBounds(ri, wmin, wmax);
             _stack.push_back(li);
             _stack.push_back(ri);
+        }
+        // entity -> leaf map (every remaining leaf)
+        for (uint32_t ni = 0; ni < nodeCount; ++ni)
+            if (nodes[ni].count > 0)
+                for (uint32_t k = 0; k < nodes[ni].count; ++k) entityLeaf[prim[nodes[ni].leftFirst + k]] = ni;
+    }
+
+    // Incremental refit: update only the leaves that contain a moved entity
+    // (recomputed[e] != 0) and their ancestors. O(moved * treeDepth).
+    void refitDirty(const uint8_t* recomputed, uint32_t n, const Vec3* wmin, const Vec3* wmax) {
+        if (nodeCount == 0) return;
+        if (_stamp.size() < nodeCount) _stamp.assign(nodeCount, 0);
+        ++_gen;
+        _touched.clear();
+        for (uint32_t e = 0; e < n && e < entityLeaf.size(); ++e) {
+            if (!recomputed[e]) continue;
+            uint32_t ni = entityLeaf[e];
+            while (true) {
+                if (_stamp[ni] == _gen) break;
+                _stamp[ni] = _gen;
+                _touched.push_back(ni);
+                if (ni == nodeParent[ni]) break;   // root
+                ni = nodeParent[ni];
+            }
+        }
+        // deepest first → children updated before parents
+        std::sort(_touched.begin(), _touched.end(), std::greater<uint32_t>());
+        for (uint32_t ni : _touched) {
+            BvhNode& node = nodes[ni];
+            if (node.count > 0) computeBounds(ni, wmin, wmax);
+            else {
+                const BvhNode& L = nodes[node.leftFirst];
+                const BvhNode& R = nodes[node.leftFirst + 1];
+                for (int k = 0; k < 3; ++k) {
+                    node.min[k] = L.min[k] < R.min[k] ? L.min[k] : R.min[k];
+                    node.max[k] = L.max[k] > R.max[k] ? L.max[k] : R.max[k];
+                }
+            }
         }
     }
 
@@ -172,6 +219,9 @@ public:
 private:
     std::vector<float> _cx, _cy, _cz;
     std::vector<uint32_t> _stack;
+    std::vector<uint32_t> _touched;
+    std::vector<uint32_t> _stamp;
+    uint32_t _gen = 0;
     mutable std::vector<uint32_t> _tstack;
 
     void computeBounds(uint32_t ni, const Vec3* wmin, const Vec3* wmax) {

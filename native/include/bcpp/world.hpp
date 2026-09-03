@@ -179,16 +179,31 @@ public:
         const Frustum fr = Frustum::fromViewProj(viewProj);
         visibleId.clear();
 
-        if (strat == CullStrategy::Bvh) {
-            // sub-linear: traverse the spatial index, prune whole subtrees
-            if (_bvhDirty || structChanged || _bvh.empty()) {
+        // A spatial index only pays off when little moves per frame. Build it on
+        // setup (first use / structural change), refit only the moved leaves on
+        // a light-motion frame, and fall back to the linear scan when a large
+        // fraction moved (the refit would cost more than the scan) — rebuilding
+        // once things settle.
+        bool useBvh = (strat == CullStrategy::Bvh);
+        if (useBvh) {
+            const bool needBuild = _bvhDirty || structChanged || _bvh.empty();
+            const bool heavyChurn = !needBuild && recomputed * 8 > count;
+            if (needBuild) {
                 _bvh.build(worldMin.data(), worldMax.data(), count);
-                _bvhDirty = false;
-                stats.bvhBuilds = 1;
+                _bvhDirty = false; stats.bvhBuilds = 1;
+            } else if (heavyChurn) {
+                // too much moved for an incremental refit to be worth it — keep
+                // the tree valid with a cheap full-AABB refit (no repartition)
+                // and cull linearly this frame.
+                if (recomputed > 0) _bvh.refit(worldMin.data(), worldMax.data());
+                useBvh = false;
             } else if (recomputed > 0) {
-                _bvh.refit(worldMin.data(), worldMax.data());
+                _bvh.refitDirty(_recomputed.data(), count, worldMin.data(), worldMax.data());
             }
             stats.bvhNodes = _bvh.nodeCount;
+        }
+
+        if (useBvh) {
             _bvh.frustumCull(fr, [&](uint32_t i, bool fullyInside) {
                 stats.traversed++;
                 const uint32_t fl = flags[i];
@@ -215,7 +230,9 @@ public:
                     bool inside = true;
                     for (int pl = 0; pl < 6; ++pl)
                         if (fr.planes[pl].dotCoordinate(center) <= -s.w) { inside = false; break; }
-                    if (inside && strat == CullStrategy::Standard)
+                    // Bvh falls back here on heavy-churn frames — it must still
+                    // match Standard's precision (sphere reject + 8-corner box)
+                    if (inside && (strat == CullStrategy::Standard || strat == CullStrategy::Bvh))
                         inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
                     if (!inside) { stats.culledFrustum++; continue; }
                 }

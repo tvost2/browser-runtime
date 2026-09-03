@@ -27,7 +27,11 @@ interface WasmWorld {
   worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
-  sTransformsRecomputed(): number; sFrameChanged(): number;
+  sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
+  raycastT(): number;
+  queryBox(minx: number, miny: number, minz: number, maxx: number, maxy: number, maxz: number): number;
+  queryResultPtr(): number;
 }
 
 export interface CoreComponents {
@@ -116,8 +120,12 @@ export class WasmCore {
   /** One boundary crossing. Returns views over WASM memory — valid until next call. */
   evaluate(strategy: CullStrategy = CullStrategy.Standard, sortByMesh = true): FrameResult {
     const w = this.world, m = this.mod;
+    const bufBefore = m.HEAPU8.buffer;
     const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty);
     this._hierarchyDirty = false;
+    // evaluate() can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
+    // swaps every HEAP* and detaches the cached component / viewProj views.
+    if (m.HEAPU8.buffer !== bufBefore) this.refreshComponentViews();
 
     const bc = w.batchCount();
     const braw = new Uint32Array(m.HEAPU32.buffer, w.batchesPtr(), bc * STRIDE.batch);
@@ -136,6 +144,7 @@ export class WasmCore {
         culledDisabled: w.sCulledDisabled(), culledFrustum: w.sCulledFrustum(),
         batches: w.sBatches(), hierarchyRebuilds: w.sHierRebuilds(),
         transformsRecomputed: w.sTransformsRecomputed(), frameChanged: w.sFrameChanged(),
+        bvhBuilds: w.sBvhBuilds(), bvhNodes: w.sBvhNodes(),
       },
     };
   }
@@ -143,6 +152,22 @@ export class WasmCore {
   /** Mark every entity's transform dirty — forces a full recompute next
    *  evaluate(). Use after a bulk write that bypassed the Transform setters. */
   markAllDirty() { this.world.markAllDirty(); }
+
+  /** Nearest entity whose world-space AABB the ray hits (BVH broadphase +
+   *  precise slab test). `dir` need not be normalised. Returns the entity id and
+   *  the hit distance along `dir`, or `null`. The spatial index is (re)built
+   *  lazily — call after an evaluate() so world AABBs are current. */
+  raycast(origin: [number, number, number], dir: [number, number, number], maxDistance = 1e30): { id: number; t: number } | null {
+    const id = this.world.raycast(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], maxDistance);
+    return id < 0 ? null : { id, t: this.world.raycastT() };
+  }
+
+  /** Entity ids whose world-space AABB overlaps the box. Returns a view over
+   *  WASM memory — copy if you need to retain it past the next query/evaluate. */
+  queryBox(min: [number, number, number], max: [number, number, number]): Uint32Array {
+    const n = this.world.queryBox(min[0], min[1], min[2], max[0], max[1], max[2]);
+    return new Uint32Array(this.mod.HEAPU32.buffer, this.world.queryResultPtr(), n);
+  }
 
   /** All-entity world matrices (not just visible) — for gizmos, physics sync, debug. */
   worldMatrices(): Float32Array {

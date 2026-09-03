@@ -23,18 +23,21 @@ const max = Number(process.argv[2] || 250_000);
 const SIZES = [1_000, 10_000, 50_000, 100_000, 250_000, 500_000].filter((n) => n <= max);
 const RATIOS = [0.001, 0.01, 0.10, 1.0];
 
-// deterministic shell scene — ~half culled by a moderate frustum, ~50% parented
-function makeScene(n) {
+// deterministic scenes. `spread` controls the world size vs the (fixed) frustum:
+//   "dense"  — ~50% of the scene is on-screen (linear cull is already cheap)
+//   "sparse" — a large world, ~2-4% on-screen (the case a spatial index is for)
+function makeScene(n, kind = "dense") {
+  const spread = kind === "sparse" ? 12000 : 800;
   const parents = new Int32Array(n).fill(-1);
   const trs = new Float32Array(n * 10);
   const extents = new Float32Array(n * 6);
   const flags = new Uint32Array(n).fill(0b011);
-  let s = 0x1234 ^ n;
+  let s = 0x1234 ^ n ^ (kind === "sparse" ? 0xabcd : 0);
   const rnd = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
   for (let i = 0; i < n; i++) {
     const b = i * 10;
     if (i > 0 && rnd() < 0.5) parents[i] = (rnd() * i) | 0;
-    trs[b] = (rnd() - 0.5) * 800; trs[b + 1] = (rnd() - 0.5) * 800; trs[b + 2] = rnd() * 900 + 50;
+    trs[b] = (rnd() - 0.5) * spread; trs[b + 1] = (rnd() - 0.5) * spread; trs[b + 2] = rnd() * (spread * 1.1) + 50;
     trs[b + 6] = 1;
     const sc = 0.5 + rnd() * 1.5;
     trs[b + 7] = trs[b + 8] = trs[b + 9] = sc;
@@ -57,31 +60,32 @@ function movingSet(n, ratio) {
   return out;
 }
 
-async function benchWasm(scene, frames) {
+const STRAT = { Standard: 0, Bvh: 3 };
+
+async function benchWasm(scene, frames, strat) {
   const be = new WasmBackend();
   await be.init();
   be.upload(scene);
-  be.evaluateFrame(vp, 0, false); // warm / first full recompute
+  be.evaluateFrame(vp, strat, false); // warm / first full recompute + BVH build
   const rows = {};
   for (const ratio of RATIOS) {
     const mv = movingSet(scene.count, ratio);
-    // a couple of settle frames at this ratio
-    for (let i = 0; i < 3; i++) { if (mv) be.nudge(mv); else be.markAllDirty(); be.evaluateFrame(vp, 0, false); }
+    for (let i = 0; i < 3; i++) { if (mv) be.nudge(mv); else be.markAllDirty(); be.evaluateFrame(vp, strat, false); }
     globalThis.gc?.();
     const s = [];
-    let recomp = 0;
+    let recomp = 0, builds = 0;
     for (let i = 0; i < frames; i++) {
       if (mv) be.nudge(mv); else be.markAllDirty();
       const t = performance.now();
-      const r = be.evaluateFrame(vp, 0, false);
+      const r = be.evaluateFrame(vp, strat, false);
       s.push(performance.now() - t);
       recomp = r.stats.transformsRecomputed;
+      builds += r.stats.bvhBuilds || 0;
     }
-    rows[ratio] = { ms: median(s), recomputed: recomp };
+    rows[ratio] = { ms: median(s), recomputed: recomp, bvhBuilds: builds };
   }
-  // fully static (no dirtying at all after warm)
-  for (let i = 0; i < 3; i++) be.evaluateFrame(vp, 0, false);
-  { const s = []; for (let i = 0; i < frames; i++) { const t = performance.now(); be.evaluateFrame(vp, 0, false); s.push(performance.now() - t); } rows["static"] = { ms: median(s), recomputed: 0 }; }
+  for (let i = 0; i < 3; i++) be.evaluateFrame(vp, strat, false);
+  { const s = []; for (let i = 0; i < frames; i++) { const t = performance.now(); be.evaluateFrame(vp, strat, false); s.push(performance.now() - t); } rows["static"] = { ms: median(s), recomputed: 0 }; }
   be.dispose();
   return rows;
 }
@@ -162,28 +166,45 @@ console.log(`\nincremental scene eval — evaluate() ms (median), shell scene, ~
 console.log(`${"N".padStart(8)}  ${"static".padStart(8)} ${"0.1%".padStart(8)} ${"1%".padStart(8)} ${"10%".padStart(8)} ${"100%".padStart(8)}  ${"JS full".padStart(8)}  ${"Bab dflt".padStart(9)} ${"Bab froz".padStart(9)}`);
 console.log("-".repeat(104));
 
-for (const n of SIZES) {
-  const scene = makeScene(n);
-  const frames = n >= 250_000 ? 40 : 120;
-  const wasm = await benchWasm(scene, frames);
-  const js = await benchJs(scene, frames);
-  const bab = await benchBabylon(scene, frames);
-  const row = { n, wasm, jsFullMs: js, babylon: bab };
-  out.rows.push(row);
-  const f = (x) => (x == null ? "  —  " : x.toFixed(2));
-  console.log(
-    `${n.toLocaleString().padStart(8)}  ${f(wasm.static.ms).padStart(8)} ${f(wasm[0.001].ms).padStart(8)} ${f(wasm[0.01].ms).padStart(8)} ${f(wasm[0.1].ms).padStart(8)} ${f(wasm[1].ms).padStart(8)}  ` +
-    `${f(js).padStart(8)}  ${f(bab?.defaultMs).padStart(9)} ${f(bab?.frozenMs).padStart(9)}`,
-  );
+console.log(`\n           STANDARD (linear cull) ms/frame          |  BVH (spatial index) ms/frame`);
+console.log(`${"N".padStart(8)} ${"vis".padStart(9)}  ${"static".padStart(7)} ${"0.1%".padStart(7)} ${"1%".padStart(7)} ${"10%".padStart(7)} ${"100%".padStart(7)}  |  ${"static".padStart(7)} ${"0.1%".padStart(7)} ${"1%".padStart(7)} ${"10%".padStart(7)} ${"100%".padStart(7)}`);
+console.log("-".repeat(112));
+
+for (const kind of ["dense", "sparse"]) {
+  console.log(`\n--- ${kind} scene ---`);
+  for (const n of SIZES) {
+    const scene = makeScene(n, kind);
+    const frames = n >= 250_000 ? 40 : 120;
+    const std = await benchWasm(scene, frames, STRAT.Standard);
+    const bvh = await benchWasm(scene, frames, STRAT.Bvh);
+    const js = kind === "dense" ? await benchJs(scene, frames) : null;
+    const bab = kind === "dense" ? await benchBabylon(scene, frames) : null;
+    // sample visibility
+    const be = new WasmBackend(); await be.init(); be.upload(scene);
+    const vis = be.evaluateFrame(vp, 0, false).visibleCount; be.dispose();
+    const row = { kind, n, visible: vis, standard: std, bvh, jsFullMs: js, babylon: bab, bvhNodes: bvh[0.01].bvhNodes };
+    out.rows.push(row);
+    const f = (x) => (x == null ? "  —  " : x.toFixed(2));
+    console.log(
+      `${n.toLocaleString().padStart(8)} v=${String(vis).padStart(7)}  ${f(std.static.ms).padStart(7)} ${f(std[0.001].ms).padStart(7)} ${f(std[0.01].ms).padStart(7)} ${f(std[0.1].ms).padStart(7)} ${f(std[1].ms).padStart(7)}  |  ` +
+      `${f(bvh.static.ms).padStart(7)} ${f(bvh[0.001].ms).padStart(7)} ${f(bvh[0.01].ms).padStart(7)} ${f(bvh[0.1].ms).padStart(7)} ${f(bvh[1].ms).padStart(7)}`,
+    );
+  }
 }
 
-// headline ratios on the largest common size
-const big = out.rows[out.rows.length - 1];
-console.log(`\nlargest (${big.n.toLocaleString()} entities):`);
-console.log(`  static frame:      WASM ${big.wasm.static.ms.toFixed(2)} ms   vs  JS-kernel full ${big.jsFullMs.toFixed(2)} ms   → ${(big.jsFullMs / big.wasm.static.ms).toFixed(0)}x`);
-console.log(`  100% moving frame: WASM ${big.wasm[1].ms.toFixed(2)} ms  (== old full-recompute behaviour)`);
-console.log(`  1% moving frame:   WASM ${big.wasm[0.01].ms.toFixed(2)} ms  (${big.wasm[0.01].recomputed} transforms recomputed)`);
-if (big.babylon?.defaultMs) console.log(`  Babylon default:   ${big.babylon.defaultMs.toFixed(2)} ms   Babylon frozen: ${big.babylon.frozenMs.toFixed(2)} ms`);
+// headline: the largest dense + sparse rows
+const dense = [...out.rows].reverse().find((r) => r.kind === "dense");
+const sparse = [...out.rows].reverse().find((r) => r.kind === "sparse");
+const bab50 = out.rows.find((r) => r.n === 50000 && r.kind === "dense")?.babylon;
+console.log(`\ndense ${dense.n.toLocaleString()} (${dense.visible} visible), JS kernel full = ${dense.jsFullMs?.toFixed(0)} ms:`);
+console.log(`  static:       Standard ${dense.standard.static.ms.toFixed(2)} ms  (${(dense.jsFullMs / dense.standard.static.ms).toFixed(0)}x vs JS kernel${bab50 ? `; Babylon 50k frozen ${bab50.frozenMs.toFixed(0)} ms` : ""})`);
+console.log(`  0.1% moving:  Standard ${dense.standard[0.001].ms.toFixed(2)} ms   Bvh ${dense.bvh[0.001].ms.toFixed(2)} ms`);
+console.log(`  100% moving:  Standard ${dense.standard[1].ms.toFixed(2)} ms   Bvh ${dense.bvh[1].ms.toFixed(2)} ms`);
+console.log(`\nsparse ${sparse.n.toLocaleString()} (${sparse.visible} visible — a big world, camera sees a sliver):`);
+console.log(`  static:       Standard ${sparse.standard.static.ms.toFixed(2)} ms   Bvh ${sparse.bvh.static.ms.toFixed(2)} ms`);
+console.log(`  0.1% moving:  Standard ${sparse.standard[0.001].ms.toFixed(2)} ms   Bvh ${sparse.bvh[0.001].ms.toFixed(2)} ms`);
+console.log(`  1% moving:    Standard ${sparse.standard[0.01].ms.toFixed(2)} ms   Bvh ${sparse.bvh[0.01].ms.toFixed(2)} ms`);
+console.log(`  10% moving:   Standard ${sparse.standard[0.1].ms.toFixed(2)} ms   Bvh ${sparse.bvh[0.1].ms.toFixed(2)} ms`);
 
 writeFileSync(join(__dir, "results", "scene-incremental.json"), JSON.stringify(out, null, 2));
 console.log(`\nwrote bench/results/scene-incremental.json`);

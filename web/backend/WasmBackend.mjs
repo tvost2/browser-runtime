@@ -70,6 +70,7 @@ export class WasmBackend {
       stats: {
         tested: r.stats.traversed, culledByFlags: r.stats.culledDisabled, culledByFrustum: r.stats.culledFrustum,
         transformsRecomputed: r.stats.transformsRecomputed, frameChanged: r.stats.frameChanged,
+        bvhBuilds: r.stats.bvhBuilds, bvhNodes: r.stats.bvhNodes,
       },
     };
   }
