@@ -39,6 +39,7 @@ if (gpp) {
     ["tests/test_world_equiv.cpp", "test_world_equiv.exe"], // bcpp::World core
     ["tests/test_incremental.cpp", "test_incremental.exe"], // incremental transform eval == full recompute
     ["tests/test_bvh.cpp", "test_bvh.exe"],                 // BVH cull == Standard + raycast/queryBox correctness
+    ["tests/test_merge.cpp", "test_merge.exe"],             // mergeMeshes: baked geometry == per-mesh draw, ids preserved
   ]) {
     try {
       execFileSync("g++", ["-std=c++20", "-O2", "-static", "-Iinclude", src, "-o", exe],

@@ -70,6 +70,7 @@
     "test:render:patch": "node bench/run-render-patch.mjs",
     "bench:mesh-upload": "node bench/run-mesh-upload.mjs",
     "bench:gpu-cull": "node bench/run-gpu-cull.mjs",
+    "bench:chunk-merge": "node bench/run-chunk-merge.mjs",
     "compare": "node web/harness/vitrine-compare/serve.mjs"
   },
   "dependencies": {

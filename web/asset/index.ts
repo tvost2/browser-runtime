@@ -8,6 +8,8 @@ export type { DecodeOptions } from "./gltf.js";
 export { decodeGLBNative, NativePipelineUnsupported, NATIVE_TIMING_LABELS, NATIVE_COUNTER_LABELS } from "./native.js";
 export type { NativeDecodeStats } from "./native.js";
 export { loadEngineModule, resetEngineModule, engineInitMs } from "../bindings/module.js";
+export { mergeMeshes, groupByCell } from "./merge.js";
+export type { MergeSource, MergedMesh } from "./merge.js";
 export { AssetManager, primitiveToMeshData } from "./AssetManager.js";
 export type { LoadResult } from "./AssetManager.js";
 export { AlphaMode } from "./Asset.js";

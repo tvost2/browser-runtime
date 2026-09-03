@@ -8,6 +8,7 @@ export interface EngineModule {
   World: new () => any;
   GltfBatch: new () => any;
   GltfPipeline: new () => any;
+  MeshMerger: new () => any;
 }
 
 let cached: Promise<EngineModule> | null = null;

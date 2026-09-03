@@ -14,4 +14,6 @@ export { WasmCore } from "../bindings/WasmCore.js";
 // asset pipeline (glTF / GLB) — Phase 1
 export { AssetManager, parseContainer, decodeGLB, isGLB, AlphaMode } from "../asset/index.js";
 export { decodeGLBNative, NativePipelineUnsupported, NATIVE_TIMING_LABELS, NATIVE_COUNTER_LABELS, loadEngineModule } from "../asset/index.js";
+export { mergeMeshes, groupByCell } from "../asset/index.js";
+export type { MergeSource, MergedMesh } from "../asset/index.js";
 export type { Asset, AssetNode, AssetMesh, AssetPrimitive, AssetMaterial, LoadResult, NativeDecodeStats } from "../asset/index.js";
