@@ -15,10 +15,22 @@
 #include <vector>
 #include <cstdint>
 #include <algorithm>
+#include <chrono>
 
 namespace bcpp {
 
-enum class CullStrategy : uint32_t { Standard = 0, BoundingSphereOnly = 1, None = 2, Bvh = 3 };
+inline double _now_us() {
+    using clk = std::chrono::steady_clock;
+    return std::chrono::duration<double, std::micro>(clk::now().time_since_epoch()).count();
+}
+
+enum class CullStrategy : uint32_t {
+    Standard = 0,           // incremental linear cull (re-test only movers when the camera is still)
+    BoundingSphereOnly = 1, // sphere-only, no 8-corner box test
+    None = 2,               // everything visible
+    Bvh = 3,                // spatial-index traversal (best for a moving camera over a large scene)
+    Auto = 4,               // per frame: Bvh while the camera moves over a big scene, else Standard
+};
 
 // flag bits (mirror web/shared/flags.ts)
 enum EntityFlags : uint32_t {
@@ -40,6 +52,11 @@ struct EvalStats {
     uint32_t frameChanged = 1;          // 0 = nothing moved AND camera unchanged → render list reused
     uint32_t bvhBuilds = 0;             // 1 if the spatial index was rebuilt this frame (0 = refit or reused)
     uint32_t bvhNodes = 0;
+    // stage timings (microseconds) — steady_clock, cheap enough to always collect
+    float transformUs = 0, cullUs = 0, listUs = 0;
+    // incremental render list
+    uint32_t listRebuilt = 1;           // 1 = pass 2 ran full; 0 = matrices patched in place
+    uint32_t dirtySlots = 0;            // instance-buffer rows whose matrix changed (when listRebuilt == 0)
 };
 
 struct Batch { uint32_t meshId; uint32_t firstInstance; uint32_t instanceCount; };
@@ -133,6 +150,7 @@ public:
         const bool structChanged = _hierarchyDirty || count != _prevCount;
 
         // --- transform pass: only dirty subtrees ---
+        const double t0 = _now_us();
         _recomputed.assign(count, 0);
         uint32_t recomputed = 0;
         for (uint32_t k = 0; k < count; ++k) {
@@ -164,14 +182,25 @@ public:
         std::fill(dirty.begin(), dirty.begin() + std::min<size_t>(count, dirty.size()), 0);
         _hierarchyDirty = false;
         _prevCount = count;
+        const double t1 = _now_us();
+        stats.transformUs = (float)(t1 - t0);
+
+        // Auto → concrete strategy for the rest of this frame: a BVH traversal
+        // beats the O(n) linear re-test while the camera moves over a large
+        // scene; the incremental linear cull is cheaper when the camera is still.
+        if (strat == CullStrategy::Auto)
+            strat = (camMoved && count > 20000 && recomputed * 8 <= count) ? CullStrategy::Bvh : CullStrategy::Standard;
 
         // --- fast path: nothing moved and the camera is unchanged → reuse last
         //     frame's render list verbatim (renderer can skip the GPU re-upload) ---
-        if (recomputed == 0 && !camMoved && !structChanged) {
+        if (recomputed == 0 && !camMoved && !structChanged && !_meshLayoutDirty) {
             stats.frameChanged = 0;
             stats.visible = prevVisible;
             stats.batches = static_cast<uint32_t>(batches.size());
             stats.traversed = 0;
+            stats.listRebuilt = 0;
+            _dirtySlots.clear();
+            _lastStrat = strat;
             return;
         }
 
@@ -204,6 +233,7 @@ public:
         }
 
         if (useBvh) {
+            _visibleBitValid = false;   // the BVH path doesn't maintain _visibleBit
             _bvh.frustumCull(fr, [&](uint32_t i, bool fullyInside) {
                 stats.traversed++;
                 const uint32_t fl = flags[i];
@@ -219,36 +249,105 @@ public:
                 visibleId.push_back(i);
             });
         } else {
-            for (uint32_t k = 0; k < count; ++k) {
-                const uint32_t i = _order[k];
-                stats.traversed++;
-                const uint32_t fl = flags[i];
-                if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { stats.culledDisabled++; continue; }
-                if (strat != CullStrategy::None && !(fl & F_ALWAYS_ACTIVE)) {
-                    const Vec4 s = worldSphere[i];
-                    const Vec3 center{s.x, s.y, s.z};
-                    bool inside = true;
-                    for (int pl = 0; pl < 6; ++pl)
-                        if (fr.planes[pl].dotCoordinate(center) <= -s.w) { inside = false; break; }
-                    // Bvh falls back here on heavy-churn frames — it must still
-                    // match Standard's precision (sphere reject + 8-corner box)
-                    if (inside && (strat == CullStrategy::Standard || strat == CullStrategy::Bvh))
-                        inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
-                    if (!inside) { stats.culledFrustum++; continue; }
-                }
-                visibleId.push_back(i);
-            }
-        }
-        stats.visible = static_cast<uint32_t>(visibleId.size());
+            // Linear cull. The frustum math (6 plane dots + 8-corner box) is the
+            // expensive part. Two paths:
+            //  · full — camera moved / structural change / strategy switch / the
+            //    persistent bit is stale: test every entity, refresh _visibleBit.
+            //  · incremental — camera unchanged: only an entity that moved this
+            //    frame can have crossed a frustum plane, so re-test just the
+            //    `_recomputed` ones and reuse _visibleBit for the rest.
+            // The O(n) scan that rebuilds `visibleId` in topo order stays either
+            // way (~7 ns/entity).
+            if (_visibleBit.size() < count) _visibleBit.assign(count, 0);
+            const bool sphereOnly = (strat == CullStrategy::BoundingSphereOnly);
+            const bool fullCull = camMoved || structChanged || (strat != _lastStrat) || !_visibleBitValid;
 
-        // pass 2: build the batched render list
-        instanceWorld.clear();
-        instanceMeshId.clear();
-        batches.clear();
-        if (sortByMesh) buildSortedBatches();
-        else            buildRunBatches();
-        stats.batches = static_cast<uint32_t>(batches.size());
+            if (fullCull) {
+                for (uint32_t k = 0; k < count; ++k) {
+                    const uint32_t i = _order[k];
+                    const uint32_t fl = flags[i];
+                    if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { _visibleBit[i] = 0; stats.culledDisabled++; continue; }
+                    uint8_t bit = 1;
+                    if (!(fl & F_ALWAYS_ACTIVE) && strat != CullStrategy::None) {
+                        const Vec4 s = worldSphere[i];
+                        bool inside = true;
+                        for (int pl = 0; pl < 6; ++pl)
+                            if (fr.planes[pl].dotCoordinate({s.x, s.y, s.z}) <= -s.w) { inside = false; break; }
+                        if (inside && !sphereOnly) inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
+                        bit = inside ? 1 : 0;
+                    }
+                    _visibleBit[i] = bit;
+                    if (bit) visibleId.push_back(i);
+                }
+                _visibleBitValid = true;
+            } else {
+                for (uint32_t k = 0; k < count; ++k) {
+                    const uint32_t i = _order[k];
+                    const uint32_t fl = flags[i];
+                    if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { _visibleBit[i] = 0; stats.culledDisabled++; continue; }
+                    if (_recomputed[i]) {
+                        uint8_t bit = 1;
+                        if (!(fl & F_ALWAYS_ACTIVE) && strat != CullStrategy::None) {
+                            const Vec4 s = worldSphere[i];
+                            bool inside = true;
+                            for (int pl = 0; pl < 6; ++pl)
+                                if (fr.planes[pl].dotCoordinate({s.x, s.y, s.z}) <= -s.w) { inside = false; break; }
+                            if (inside && !sphereOnly) inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
+                            bit = inside ? 1 : 0;
+                        }
+                        _visibleBit[i] = bit;
+                    }
+                    if (_visibleBit[i]) visibleId.push_back(i);
+                }
+            }
+            stats.traversed = count;
+            stats.culledFrustum = stats.entities - stats.culledDisabled - (uint32_t)visibleId.size();
+        }
+        _lastStrat = strat;
+        stats.visible = static_cast<uint32_t>(visibleId.size());
+        const double t2 = _now_us();
+        stats.cullUs = (float)(t2 - t1);
+
+        // --- pass 2: render list ---
+        // If the visible SET and batch layout are unchanged from last frame
+        // (same entities in the same cull order, same sort mode, no meshId
+        // edits), the slot assignment is identical — just overwrite the matrix
+        // rows of entities that actually moved and hand the renderer a dirty
+        // slot list for a partial GPU upload. Otherwise rebuild from scratch.
+        const bool sameLayout = !structChanged && !_meshLayoutDirty
+            && sortByMesh == _lastSortByMesh
+            && visibleId.size() == _visiblePrev.size()
+            && std::equal(visibleId.begin(), visibleId.end(), _visiblePrev.begin());
+
+        if (sameLayout) {
+            _dirtySlots.clear();
+            for (uint32_t k = 0; k < visibleId.size(); ++k) {
+                const uint32_t e = visibleId[k];
+                if (!_recomputed[e]) continue;
+                const int32_t s = _entitySlot[e];
+                if (s < 0) continue;
+                instanceWorld[s] = world[e];
+                _dirtySlots.push_back((uint32_t)s);
+            }
+            stats.listRebuilt = 0;
+            stats.dirtySlots = (uint32_t)_dirtySlots.size();
+            stats.batches = (uint32_t)batches.size();
+        } else {
+            instanceWorld.clear();
+            instanceMeshId.clear();
+            batches.clear();
+            if (sortByMesh) buildSortedBatches();
+            else            buildRunBatches();
+            _visiblePrev.assign(visibleId.begin(), visibleId.end());
+            _lastSortByMesh = sortByMesh;
+            _meshLayoutDirty = false;
+            stats.listRebuilt = 1;
+            stats.batches = (uint32_t)batches.size();
+        }
+        stats.listUs = (float)(_now_us() - t2);
     }
+
+    void markMeshLayoutDirty() { _meshLayoutDirty = true; }   // meshId or visibility flag of some entity changed
 
     // topological order: parents strictly before children (forest / DAG)
     void rebuildOrder() {
@@ -266,12 +365,25 @@ private:
     std::vector<int32_t>  _depth;
     std::vector<uint64_t> _sortKeys;
     std::vector<uint8_t>  _recomputed;
+    std::vector<uint8_t>  _visibleBit;    // persistent frustum-visibility bit per entity (Standard cull)
+    std::vector<uint32_t> _visiblePrev;   // last frame's visibleId (same cull order) for the sameLayout check
+    std::vector<int32_t>  _entitySlot;    // entity -> its row in instanceWorld (-1 = not visible)
+    std::vector<uint32_t> _dirtySlots;    // rows patched this frame (when listRebuilt == 0)
     Bvh _bvh;
     bool _hierarchyDirty = true;
     bool _bvhDirty = true;
+    bool _meshLayoutDirty = false;
+    bool _lastSortByMesh = true;
+    bool _visibleBitValid = false;   // _visibleBit reflects the current frustum (Standard path only)
+    CullStrategy _lastStrat = CullStrategy::Standard;
     uint32_t _prevCount = 0;
     Mat4 _lastViewProj{};
     bool _hasLastViewProj = false;
+
+public:
+    int32_t dirtySlotsPtr() { return (int32_t)(intptr_t)_dirtySlots.data(); }
+    uint32_t dirtySlotCount() { return (uint32_t)_dirtySlots.size(); }
+private:
 
 public:
     // ---- spatial queries (BVH-accelerated; build/refit happens in evaluate()
@@ -357,10 +469,12 @@ private:
         const size_t n = visibleId.size();
         instanceWorld.resize(n);
         instanceMeshId.resize(n);
+        _entitySlot.assign(count, -1);
         for (size_t k = 0; k < n; ++k) {
             const uint32_t e = visibleId[k];
             instanceWorld[k] = world[e];
             instanceMeshId[k] = meshId[e];
+            _entitySlot[e] = (int32_t)k;
         }
         for (size_t k = 0; k < n; ) {
             const uint32_t m = instanceMeshId[k];
@@ -376,6 +490,7 @@ private:
         const size_t n = visibleId.size();
         instanceWorld.resize(n);
         instanceMeshId.resize(n);
+        _entitySlot.assign(count, -1);
         if (n == 0) return;
 
         uint32_t maxMesh = 0;
@@ -389,6 +504,7 @@ private:
             const uint32_t slot = _hist[meshId[e]]++;
             instanceWorld[slot] = world[e];
             instanceMeshId[slot] = meshId[e];
+            _entitySlot[e] = (int32_t)slot;
         }
         // rebuild batches from the (now sorted) instanceMeshId
         for (size_t k = 0; k < n; ) {

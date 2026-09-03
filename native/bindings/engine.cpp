@@ -41,8 +41,9 @@ struct WasmWorld {
 
     // one boundary crossing per frame. `hierarchyDirty` is tracked JS-side so
     // per-entity setParent() calls during scene build cost zero crossings.
-    uint32_t evaluate(uint32_t strategy, bool sortByMesh, bool hierarchyDirty) {
+    uint32_t evaluate(uint32_t strategy, bool sortByMesh, bool hierarchyDirty, bool meshLayoutDirty) {
         if (hierarchyDirty) w.markHierarchyDirty();
+        if (meshLayoutDirty) w.markMeshLayoutDirty();
         Mat4 vp;
         for (int i = 0; i < 16; ++i) vp.m[i] = viewProj[i];
         w.evaluate(vp, static_cast<CullStrategy>(strategy), sortByMesh);
@@ -71,6 +72,13 @@ struct WasmWorld {
     uint32_t sFrameChanged() { return w.stats.frameChanged; }
     uint32_t sBvhBuilds()    { return w.stats.bvhBuilds; }
     uint32_t sBvhNodes()     { return w.stats.bvhNodes; }
+    float sTransformUs()     { return w.stats.transformUs; }
+    float sCullUs()          { return w.stats.cullUs; }
+    float sListUs()          { return w.stats.listUs; }
+    uint32_t sListRebuilt()  { return w.stats.listRebuilt; }
+    uint32_t sDirtySlots()   { return w.stats.dirtySlots; }
+    int dirtySlotsPtr()      { return w.dirtySlotsPtr(); }   // u32 x sDirtySlots — instanceWorld rows to re-upload
+    void markMeshLayoutDirty() { w.markMeshLayoutDirty(); }
 
     // ---- spatial queries ----
     float _rayT = 0;
@@ -130,6 +138,13 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("sFrameChanged", &WasmWorld::sFrameChanged)
         .function("sBvhBuilds", &WasmWorld::sBvhBuilds)
         .function("sBvhNodes", &WasmWorld::sBvhNodes)
+        .function("sTransformUs", &WasmWorld::sTransformUs)
+        .function("sCullUs", &WasmWorld::sCullUs)
+        .function("sListUs", &WasmWorld::sListUs)
+        .function("sListRebuilt", &WasmWorld::sListRebuilt)
+        .function("sDirtySlots", &WasmWorld::sDirtySlots)
+        .function("dirtySlotsPtr", &WasmWorld::dirtySlotsPtr)
+        .function("markMeshLayoutDirty", &WasmWorld::markMeshLayoutDirty)
         .function("raycast", &WasmWorld::raycast)
         .function("raycastT", &WasmWorld::raycastT)
         .function("queryBox", &WasmWorld::queryBox)
