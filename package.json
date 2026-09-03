@@ -66,7 +66,8 @@
     "test:spatial": "node bench/run-spatial.mjs",
     "bench:scene": "node --expose-gc bench/run-scene-incremental.mjs",
     "bench:renderer": "node --expose-gc bench/run-renderer-incremental.mjs",
-    "bench:renderer:gpu": "node bench/run-renderer-gpu.mjs"
+    "bench:renderer:gpu": "node bench/run-renderer-gpu.mjs",
+    "test:render:patch": "node bench/run-render-patch.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.0"
