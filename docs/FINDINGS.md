@@ -8,6 +8,54 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-017 · Chunk merge — N unique static meshes → a handful of draws (C++ kernel)
+Branch `feat/chunk-merge` (off `feat/gpu-frame-block`).
+`npm run bench:chunk-merge` · `npm run test:equivalence` (native `test_merge`)
+
+WebGPU has no multi-draw-indirect and no `draw_index` in the shader, so a scene
+of N unique static meshes is N `drawIndexedIndirect` + N `setBindGroup` per
+frame no matter how the cull is done. The only lever is **fewer, bigger
+buckets**: group meshes spatially and bake each group into one mesh.
+
+`bcpp::mergeMeshes` (`native/include/bcpp/merge.hpp`) — the per-vertex work:
+world-bake positions (`transformCoord`), transform normals by the
+**inverse-transpose** of the upper 3×3 (correct for the non-uniform scale
+building footprints routinely have), rebase indices by the running vertex
+offset, and tag every output vertex with its **source item id** so a pick pass
+can still resolve the individual object. `MeshMerger` embind class: JS packs all
+source geometry contiguously + one descriptor row per item, one `merge()` call,
+reads views back. TS: `mergeMeshes(sources)` + `groupByCell(centers, cellSize)`.
+
+`bench:chunk-merge`, 4000 unique jittered boxes, 140-unit grid, WARP:
+
+| | draw buckets | entities | cpu/frame (camera orbit) | fps |
+|---|--:|--:|--:|--:|
+| no merge | **3505** | 4000 | 8.06 ms | 124 |
+| merge (Standard cull) | **68** | 72 | **0.53 ms** | 1881 |
+| merge (Gpu cull) | 68 | 72 | 1.13 ms | 881 |
+
+**52× fewer draw buckets.** Merge kernel: 58.6 ms one-time for 96k verts /
+48k tris across 72 cells. Geometry conserved exactly — vertices 96000→96000,
+indices 144000→144000; every merged-vertex id in `[0, 4000)`; merged world-AABB
+matches a reference built from source-geometry × transform. `native/test_merge`
+checks the same per-triangle against a host-side transform, plus the
+inverse-transpose normal and a singular-matrix fallback. No WebGPU validation
+errors in any mode.
+
+Note the Standard/Gpu flip: with the entity count collapsed to 72, the GPU
+compute-dispatch overhead (a WARP artifact, but the pattern holds) outweighs
+its per-frame-upload saving — `CullStrategy.Gpu` is for *many* entities, and
+merge removes them. Merge + Standard is the combination for this workload.
+
+### Next
+- **pick buffer** — a render pass writing the per-vertex id to an `r32uint`
+  target + `pickAt(x, y)` readback, so individual buildings stay selectable
+  after the merge.
+- wire into the Uberlândia twin (`groupByCell` over building centroids,
+  re-merge a cell when its buildings stream in).
+
+---
+
 ## F-016 · One per-frame WASM→WebGPU upload — C++ lays out the frame block
 Branch `feat/gpu-frame-block` (off `feat/gpu-driven-cull`).
 `npm run bench:gpu-cull` · `npm run test:equivalence` · `npm run test:render:patch`
