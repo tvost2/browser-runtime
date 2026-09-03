@@ -19,9 +19,10 @@ export interface AssetNode {
 export interface AssetPrimitive {
   /** interleaved? no — separate tight arrays, ready for one VBO each (or packed) */
   positions: Float32Array;       // [n*3]
-  normals: Float32Array | null;  // [n*3] — null if the glTF omitted them
+  normals: Float32Array | null;  // [n*3] — generated flat by the WASM path if the glTF omitted them
   uv0: Float32Array | null;      // [n*2]
   color0: Float32Array | null;   // [n*4]
+  tangents: Float32Array | null; // [n*4] — only when decoded with generateTangents
   indices: Uint32Array;          // always 32-bit here (u8/u16 widened on decode)
   /** index into `Asset.materials`, or −1 */
   material: number;
@@ -76,5 +77,11 @@ export interface Asset {
     nodes: number; meshes: number; primitives: number;
     vertices: number; indices: number; textures: number;
     zeroCopyAccessors: number; copiedAccessors: number;
+    /** which geometry decoder ran */
+    geometryPath: "wasm" | "js" | "mixed";
+    /** JS→WASM calls made for geometry (0 for the js path) */
+    wasmCrossings: number;
+    /** binary bytes copied into WASM linear memory */
+    bytesUploadedToWasm: number;
   };
 }

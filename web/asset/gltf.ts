@@ -22,6 +22,28 @@ const TYPE_COMPONENTS: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, V
 export interface DecodeOptions {
   /** resolve an external `buffers[].uri` / `images[].uri`. Return null to skip. */
   resolveUri?: (uri: string) => Promise<Uint8Array | null>;
+  /** geometry processing path.
+   *   `"auto"` (default) — per primitive: geometry that is already GPU-ready
+   *      (packed-F32 attributes, present normals, U16/U32 indices, accessor
+   *      min/max) takes the JS zero-copy view path; anything that needs real
+   *      work (tangent generation, missing normals, de-quantising normalized /
+   *      integer attributes, de-interleaving, expanding non-indexed) goes to
+   *      the C++/WASM batch core.
+   *   `"wasm"` — force the C++/WASM core for every non-sparse primitive.
+   *   `"js"`   — force the reference decoder.
+   *  Sparse accessors and COLOR_0 always use the JS reference path. */
+  geometry?: "auto" | "wasm" | "js";
+  /** generate tangents (needs UV0 + normals). Off by default. */
+  generateTangents?: boolean;
+  /** override the engine.wasm URL (tests) */
+  wasmUrl?: string;
+}
+
+/** per-decode stats — which path ran, how much crossed the boundary */
+export interface DecodeStats {
+  geometryPath: "wasm" | "js" | "mixed";
+  wasmCrossings: number;
+  bytesUploadedToWasm: number;
 }
 
 export async function decodeGLB(bytes: Uint8Array, opts: DecodeOptions = {}): Promise<Asset> {
@@ -91,35 +113,109 @@ export async function decodeContainer(c: GltfContainer, opts: DecodeOptions = {}
   }
 
   // ---- meshes / primitives ----
-  const meshes: AssetMesh[] = (g.meshes ?? []).map((m: any, mi: number) => ({
-    name: m.name ?? `mesh${mi}`,
-    primitives: (m.primitives ?? []).map((p: any, pi: number): AssetPrimitive => {
-      if ((p.mode ?? 4) !== 4) note(`mesh ${mi} primitive ${pi}: mode ${p.mode} (only TRIANGLES=4)`);
+  // Collect every primitive's spec first, decode geometry in ONE batch (WASM by
+  // default), then assemble.
+  interface Slot { idx: number; mi: number; pi: number; p: any; a: any; jsFallback: boolean; }
+  const slots: Slot[] = [];
+  for (let mi = 0; mi < (g.meshes?.length ?? 0); mi++) {
+    for (let pi = 0; pi < (g.meshes[mi].primitives?.length ?? 0); pi++) {
+      const p = g.meshes[mi].primitives[pi];
       const a = p.attributes ?? {};
+      if ((p.mode ?? 4) !== 4) note(`mesh ${mi} primitive ${pi}: mode ${p.mode} (only TRIANGLES=4)`);
       if (a.POSITION == null) throw new GltfError(`mesh ${mi} primitive ${pi}: no POSITION`);
-      const posAcc = readAccessor(a.POSITION);
-      const pos = posAcc.data as Float32Array;
-      const nrm = a.NORMAL != null ? readAccessor(a.NORMAL).data as Float32Array : null;
-      const uv0 = a.TEXCOORD_0 != null ? readAccessor(a.TEXCOORD_0).data as Float32Array : null;
-      const col0 = a.COLOR_0 != null ? readAccessor(a.COLOR_0).data as Float32Array : null;
       for (const k of Object.keys(a)) if (!["POSITION", "NORMAL", "TEXCOORD_0", "COLOR_0", "TANGENT"].includes(k)) note(`attribute ${k} (ignored)`);
-      if (a.TANGENT != null) note("TANGENT (ignored — Phase 7)");
+      if (a.TANGENT != null && !opts.generateTangents) note("TANGENT (ignored — pass generateTangents to regenerate)");
+      if (a.COLOR_0 != null) note(`mesh ${mi} primitive ${pi}: COLOR_0 (js path only)`);
+      const usesSparse = [a.POSITION, a.NORMAL, a.TEXCOORD_0, p.indices].some((i) => i != null && g.accessors[i].sparse);
+      slots.push({ idx: slots.length, mi, pi, p, a, jsFallback: usesSparse || a.COLOR_0 != null });
+    }
+  }
 
-      let idx: Uint32Array;
-      if (p.indices != null) idx = toU32(readAccessor(p.indices).data);
-      else { idx = new Uint32Array(pos.length / 3); for (let i = 0; i < idx.length; i++) idx[i] = i; }
+  const path = opts.geometry ?? "auto";
+  const genTan = !!opts.generateTangents;
+  const geomOf: (AssetPrimitive | null)[] = new Array(slots.length).fill(null);
+  const stats: DecodeStats = { geometryPath: "js", wasmCrossings: 0, bytesUploadedToWasm: 0 };
 
-      const accPos = g.accessors[a.POSITION];
-      let mn: [number, number, number], mx: [number, number, number];
-      if (accPos.min && accPos.max) { mn = accPos.min.slice(0, 3); mx = accPos.max.slice(0, 3); }
-      else { [mn, mx] = aabbOf(pos); }
+  // "auto": a primitive already in GPU-ready layout stays in JS (zero-copy views
+  // beat any path that has to cross the WASM heap); everything that needs work
+  // — tangents, missing normals, quantised attrs, interleave, non-indexed —
+  // goes to the C++/WASM batch core.
+  const packedF32 = (ai: number | null | undefined): boolean => {
+    if (ai == null) return true;
+    const acc = g.accessors[ai];
+    if (acc.sparse || acc.normalized || acc.componentType !== 5126) return false;
+    const bv = g.bufferViews[acc.bufferView ?? 0];
+    const comps = TYPE_COMPONENTS[acc.type] ?? 1;
+    return bv.byteStride == null || bv.byteStride === comps * 4;
+  };
+  const gpuReady = (s: Slot): boolean => {
+    if (s.jsFallback || genTan) return false;
+    const a = s.a;
+    if (a.NORMAL == null) return false;                        // WASM generates missing normals
+    if (s.p.indices == null) return false;                     // WASM expands non-indexed
+    const it = g.accessors[s.p.indices].componentType;
+    if (it !== 5121 && it !== 5123 && it !== 5125) return false;
+    if (!packedF32(a.POSITION) || !packedF32(a.NORMAL) || !packedF32(a.TEXCOORD_0)) return false;
+    const pa = g.accessors[a.POSITION];
+    return !!(pa.min && pa.max);                               // WASM computes missing AABB
+  };
 
-      return {
-        positions: pos, normals: nrm, uv0, color0: col0, indices: idx,
-        material: p.material ?? -1, aabbMin: mn, aabbMax: mx,
-        zeroCopy: posAcc.view,
+  const wasmSet = new Set<Slot>(
+    path === "js" ? []
+      : slots.filter((s) => !s.jsFallback && (path === "wasm" || !gpuReady(s))),
+  );
+  const wasmSlots = [...wasmSet];
+  const jsSlots = slots.filter((s) => !wasmSet.has(s));
+
+  if (wasmSlots.length) {
+    const { processPrimitivesWasm } = await import("./wasm.js");
+    const specs = wasmSlots.map((s) => ({
+      position: s.a.POSITION, normal: s.a.NORMAL, uv0: s.a.TEXCOORD_0, indices: s.p.indices,
+    }));
+    const res = await processPrimitivesWasm(c, specs, { generateTangents: opts.generateTangents, wasmUrl: opts.wasmUrl });
+    stats.wasmCrossings = res.crossings;
+    stats.bytesUploadedToWasm = res.bytesUploaded;
+    wasmSlots.forEach((s, i) => {
+      const gm = res.geometries[i];
+      // COPY out of WASM memory — the module's heap is reused; these must survive
+      geomOf[s.idx] = {
+        positions: gm.positions.slice(), normals: gm.normals.slice(),
+        uv0: gm.uv0 ? gm.uv0.slice() : null, color0: null,
+        tangents: gm.tangents ? gm.tangents.slice() : null,
+        indices: gm.indices.slice(),
+        material: s.p.material ?? -1, aabbMin: [...gm.aabbMin], aabbMax: [...gm.aabbMax],
+        zeroCopy: false,
       };
-    }),
+      if (gm.generatedNormals) note(`mesh ${s.mi} primitive ${s.pi}: normals generated (source had none)`);
+    });
+  }
+
+  for (const s of jsSlots) {
+    const a = s.a, posAcc = readAccessor(a.POSITION);
+    const pos = posAcc.data as Float32Array;
+    let idx: Uint32Array;
+    if (s.p.indices != null) idx = toU32(readAccessor(s.p.indices).data);
+    else { idx = new Uint32Array(pos.length / 3); for (let i = 0; i < idx.length; i++) idx[i] = i; }
+    const accPos = g.accessors[a.POSITION];
+    let mn: [number, number, number], mx: [number, number, number];
+    if (accPos.min && accPos.max) { mn = accPos.min.slice(0, 3); mx = accPos.max.slice(0, 3); }
+    else { [mn, mx] = aabbOf(pos); }
+    geomOf[s.idx] = {
+      positions: pos,
+      normals: a.NORMAL != null ? readAccessor(a.NORMAL).data as Float32Array : null,
+      uv0: a.TEXCOORD_0 != null ? readAccessor(a.TEXCOORD_0).data as Float32Array : null,
+      color0: a.COLOR_0 != null ? readAccessor(a.COLOR_0).data as Float32Array : null,
+      tangents: null,
+      indices: idx, material: s.p.material ?? -1, aabbMin: mn, aabbMax: mx,
+      zeroCopy: posAcc.view,
+    };
+  }
+
+  stats.geometryPath = wasmSlots.length && jsSlots.length ? "mixed" : wasmSlots.length ? "wasm" : "js";
+
+  const meshes: AssetMesh[] = (g.meshes ?? []).map((m: any, mi: number): AssetMesh => ({
+    name: m.name ?? `mesh${mi}`,
+    primitives: slots.filter((s) => s.mi === mi).map((s) => geomOf[s.idx]!),
   }));
 
   // ---- materials ----
@@ -205,6 +301,9 @@ export async function decodeContainer(c: GltfContainer, opts: DecodeOptions = {}
       nodes: nodes.length, meshes: meshes.length, primitives: primCount,
       vertices: vtxCount, indices: idxCount, textures: textures.length,
       zeroCopyAccessors: zeroCopy, copiedAccessors: copied,
+      geometryPath: stats.geometryPath,
+      wasmCrossings: stats.wasmCrossings,
+      bytesUploadedToWasm: stats.bytesUploadedToWasm,
     },
   };
 }

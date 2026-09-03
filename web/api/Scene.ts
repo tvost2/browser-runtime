@@ -4,9 +4,10 @@ import { Camera } from "./Camera.js";
 import { CullStrategy, FLAG, type FrameResult } from "../../shared/layout.js";
 
 export interface MeshData {
-  positions: Float32Array; // xyz
+  positions: Float32Array;      // xyz
   indices: Uint32Array;
-  normals?: Float32Array;
+  normals?: Float32Array;       // xyz — renderer flat-shades if absent
+  uv0?: Float32Array | null;    // uv
 }
 
 /** A scene = one WASM `World` + a mesh registry + a camera. Entities are dense
@@ -20,6 +21,8 @@ export class Scene {
   /** @internal */ _core: WasmCore;
   /** @internal */ _meshBounds = new Map<number, { min: Float32Array; max: Float32Array }>();
   /** @internal */ _meshData = new Map<number, MeshData>();
+  /** @internal set by Engine.createScene — the WebGPU renderer (undefined in Node) */
+  _renderer?: import("../renderer/Renderer.js").Renderer;
   /** @internal set by Engine when the renderer has uploaded the current mesh set */
   _meshesDirty = true;
   private _meshByData = new Map<MeshData, number>();
@@ -105,11 +108,11 @@ export class Scene {
 
   /** Load a .glb / .gltf and instantiate it into this scene. Convenience over
    *  `new AssetManager().loadInto(url, scene)` (import from `web/asset`). */
-  async loadAsset(url: string) {
+  async loadAsset(url: string, opts: import("../asset/gltf.js").DecodeOptions = {}) {
     if (!this._assets) {
       const { AssetManager } = await import("../asset/AssetManager.js");
       this._assets = new AssetManager();
     }
-    return this._assets.loadInto(url, this);
+    return this._assets.loadInto(url, this, opts);
   }
 }
