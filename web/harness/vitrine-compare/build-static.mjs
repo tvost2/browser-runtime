@@ -85,6 +85,6 @@ await writeFile(join(here, "Caddyfile.snippet"), `# add to the VM Caddyfile, the
 
 console.log(`\n  built  ${out}`);
 console.log(`  models ${manifest.files.map((f) => `${f.name} (${f.mb}MB)`).join(", ")}`);
-console.log(`\n  deploy:`);
-console.log(`    rsync -avz --delete "${out}/" mytheria@192.168.100.127:/opt/sitefactory/deploy/3dviewer/`);
-console.log(`    (then add dist/Caddyfile.snippet to the VM Caddyfile and: caddy reload)\n`);
+console.log(`\n  deploy (DNS + Caddy already set up — just push files):`);
+console.log(`    cd "${out}" && tar czf - . | ssh mytheria@192.168.100.127 'tar xzf - -C /opt/sitefactory/deploy/3dviewer'`);
+console.log(`  live: https://3dviewer.mytheria.com.br   (see DEPLOY.md)\n`);

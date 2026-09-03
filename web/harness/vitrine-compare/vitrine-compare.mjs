@@ -9,6 +9,24 @@ const BJS = NO_BABYLON ? {} : await import("/babylon.js");
 const $ = (id) => document.getElementById(id);
 const errBox = $("err");
 const showErr = (m) => { errBox.textContent = m; errBox.style.display = "block"; };
+const noteL = $("noteL");
+const showNote = (html) => {
+  noteL.innerHTML = `<span class="x" title="fechar">×</span>` + html;
+  noteL.querySelector(".x").onclick = () => noteL.classList.remove("show");
+  noteL.classList.add("show");
+};
+const hideNote = () => noteL.classList.remove("show");
+
+// Is this a software / fallback WebGPU adapter? (WARP on Windows, SwiftShader,
+// llvmpipe on Linux.) Those init fine and report stats but frequently never
+// composite to the canvas — the pane just stays black. Warn instead of lying.
+function adapterIsSoftware(adapter) {
+  if (!adapter) return false;
+  if (adapter.isFallbackAdapter) return true;
+  const info = adapter.info || {};
+  const s = `${info.vendor || ""} ${info.architecture || ""} ${info.description || ""}`.toLowerCase();
+  return /warp|swiftshader|llvmpipe|basic render|microsoft basic|software|lavapipe/.test(s);
+}
 
 const sel = $("model");
 const dpr = Math.min(devicePixelRatio, 2);
@@ -50,10 +68,23 @@ async function loadRuntime(url) {
     throw new Error(`no WebGPU adapter on this machine (GPU too old / blocklisted). Fix: paste  ${flag}  in a new tab → set "Unsafe WebGPU Support" to Enabled → restart the browser → reload this page.  OR run  npm run compare  (opens a pre-flagged browser).`);
   }
   $("sL").textContent = "loading…";
+  // stop the render loop touching this scene until it is fully instantiated —
+  // the tick() below runs during every await here and a half-built scene
+  // (0 entities, camera not framed) would render garbage / throw
+  rt.ready = false;
+  rt.center = null;
   if (rt.engine) { rt.engine.dispose(); rt.engine = null; }
   // canvas sized once at module load; the runtime engine binds its depth buffer to it
   const t0 = performance.now();
   rt.engine = await RtEngine.create(cL);
+  hideNote();
+  const adapter = rt.engine.renderer?.adapter;
+  rt.software = adapterIsSoftware(adapter);
+  if (rt.software) {
+    const d = (adapter.info && (adapter.info.description || adapter.info.vendor)) || "software";
+    showNote(`<b>⚠ WebGPU por software</b> (${d}) — sem GPU real, o render aqui é lento e pode falhar. ` +
+      `Melhor num <b>celular recente</b> (Chrome 121+ / Safari 18+) ou desktop com GPU.`);
+  }
   rt.scene = rt.engine.createScene();
   const { result } = await rt.scene.loadAsset(url, { parser: "native", generateTangents: false });
   const loadMs = performance.now() - t0;
@@ -112,6 +143,7 @@ async function loadRuntime(url) {
   $("advL").innerHTML = `<b>decode + geometry in C++/WASM</b><br>` +
     `${rt.stats.normalsGen ? "area-weighted normals generated in C++ · " : ""}` +
     `${rt.stats.crossings} JS↔WASM crossings · SoA · WebGPU instanced draw`;
+  rt.ready = true;
 }
 
 // ================= RIGHT — Babylon.js =================
@@ -119,6 +151,8 @@ async function loadRuntime(url) {
 const bb = { engine: null, scene: null };
 async function loadBabylon(url) {
   $("sR").textContent = "loading…";
+  bb.ready = false;
+  bb.radius = null;
   if (bb.engine) { bb.engine.dispose(); bb.engine = null; }
 
   const t0 = performance.now();
@@ -156,6 +190,7 @@ async function loadBabylon(url) {
   bb.stats = { loadMs, decodeMs, verts, tris, meshes };
   $("advR").innerHTML = `<b>decode + geometry in JavaScript</b><br>` +
     `class-per-mesh scene graph · normals computed in JS · WebGL draw`;
+  bb.ready = true;
 }
 
 // ---------- load + render loop ----------
@@ -179,24 +214,28 @@ function tick(ts) {
   //   radius = 2.6·r · polar (beta) 1.15 rad from +Y · same azimuth
   const R = 2.6, BETA = 1.15;
   const sb = Math.sin(BETA), cb = Math.cos(BETA);
-  // --- runtime ---
-  if (rt.engine && rt.scene && rt.center) {
-    const d = rt.radius * R;
-    rt.scene.camera.position = [
-      rt.center[0] + d * sb * Math.cos(camAngle),
-      rt.center[1] + d * cb,
-      rt.center[2] + d * sb * Math.sin(camAngle),
-    ];
-    const st = rt.engine.renderOnce();
-    accL += st.cpuFrameMs;
+  // --- runtime --- (one bad frame must not kill the rAF loop)
+  if (rt.ready && rt.engine && rt.scene && rt.center) {
+    try {
+      const d = rt.radius * R;
+      rt.scene.camera.position = [
+        rt.center[0] + d * sb * Math.cos(camAngle),
+        rt.center[1] + d * cb,
+        rt.center[2] + d * sb * Math.sin(camAngle),
+      ];
+      const st = rt.engine.renderOnce();
+      accL += st.cpuFrameMs;
+    } catch (e) { rt.ready = false; showErr("runtime render: " + (e.message || e)); console.error(e); }
   }
   // --- babylon --- (ArcRotate: alpha around +Y, beta from +Y)
-  if (bb.engine && bb.scene && bb.radius) {
-    const cam = bb.scene.activeCamera;
-    if (cam) { cam.alpha = camAngle + Math.PI; cam.beta = BETA; cam.radius = bb.radius * R; }
-    const t = performance.now();
-    bb.scene.render();
-    accR += performance.now() - t;
+  if (bb.ready && bb.engine && bb.scene && bb.radius) {
+    try {
+      const cam = bb.scene.activeCamera;
+      if (cam) { cam.alpha = camAngle + Math.PI; cam.beta = BETA; cam.radius = bb.radius * R; }
+      const t = performance.now();
+      bb.scene.render();
+      accR += performance.now() - t;
+    } catch (e) { bb.ready = false; showErr("babylon render: " + (e.message || e)); console.error(e); }
   }
   nn++;
   if (nn >= 20) {
