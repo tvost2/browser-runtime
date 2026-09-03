@@ -261,16 +261,50 @@ export class Renderer {
     });
   }
 
+  /** bytes uploaded to the instance storage buffer on the last render() */
+  lastUploadBytes = 0;
+
   render(viewProj: Float32Array, frame: FrameResult) {
     const d = this.device;
     d.queue.writeBuffer(this.camBuf, 0, viewProj);
     this.ensureModelBuffer(Math.max(1, frame.visibleCount));
-    // frame.stats.frameChanged === 0 → the visible set + instance matrices are
-    // byte-identical to last frame; the instance storage buffer is already
-    // correct, skip the re-upload. (The camera uniform still updates — a
-    // frameChanged=0 frame still redraws, e.g. for a resize or post-effect.)
-    if (frame.visibleCount > 0 && frame.stats.frameChanged !== 0)
-      d.queue.writeBuffer(this.modelBuf, 0, frame.instanceWorld.buffer, frame.instanceWorld.byteOffset, frame.visibleCount * 64);
+    this.lastUploadBytes = 0;
+
+    // Instance storage buffer sync:
+    //  · frameChanged === 0        → nothing changed, buffer is already correct.
+    //  · listRebuilt === 1         → the whole list moved, one full upload.
+    //  · listRebuilt === 0 + dirty → the visible set + batch layout are identical
+    //    to last frame; only the matrix rows in `dirtySlots` changed → coalesce
+    //    them into runs and patch (a partial upload).
+    const iw = frame.instanceWorld;
+    const dirty = frame.dirtySlots;
+    if (frame.visibleCount === 0 || frame.stats.frameChanged === 0) {
+      // nothing to upload
+    } else if (frame.stats.listRebuilt === 0) {
+      // the buffer is already correct except for the changed matrix rows
+      if (dirty && dirty.length > 0) {
+        if (dirty.length * 3 >= frame.visibleCount) {
+          d.queue.writeBuffer(this.modelBuf, 0, iw.buffer, iw.byteOffset, frame.visibleCount * 64);
+          this.lastUploadBytes = frame.visibleCount * 64;
+        } else {
+          const slots = dirty.length > 1 ? Uint32Array.from(dirty).sort() : dirty;
+          let runStart = slots[0], prev = slots[0];
+          const flush = (end: number) => {
+            const bytes = (end - runStart + 1) * 64;
+            d.queue.writeBuffer(this.modelBuf, runStart * 64, iw.buffer, iw.byteOffset + runStart * 64, bytes);
+            this.lastUploadBytes += bytes;
+          };
+          for (let k = 1; k < slots.length; k++) {
+            if (slots[k] === prev + 1) { prev = slots[k]; continue; }
+            flush(prev); runStart = prev = slots[k];
+          }
+          flush(prev);
+        }
+      }
+    } else {
+      d.queue.writeBuffer(this.modelBuf, 0, iw.buffer, iw.byteOffset, frame.visibleCount * 64);
+      this.lastUploadBytes = frame.visibleCount * 64;
+    }
 
     const enc = d.createCommandEncoder();
     const pass = enc.beginRenderPass({

@@ -52,6 +52,9 @@ export class WasmBackend {
     }
   }
 
+  get components() { return this.#core.components; }
+  markMeshLayoutDirty() { this.#core.markMeshLayoutDirty(); }
+
   /** flag a subset of entities dirty (transform changed) without rewriting data */
   markDirty(indices) { const D = this.#core.components.dirty; for (let k = 0; k < indices.length; k++) D[indices[k]] = 1; }
   markAllDirty() { this.#core.markAllDirty(); }
@@ -67,10 +70,13 @@ export class WasmBackend {
       visibleCount: r.visibleCount,
       visibleIds: r.visibleIds,
       visibleWorld: r.instanceWorld,
+      dirtySlots: r.dirtySlots,
       stats: {
         tested: r.stats.traversed, culledByFlags: r.stats.culledDisabled, culledByFrustum: r.stats.culledFrustum,
         transformsRecomputed: r.stats.transformsRecomputed, frameChanged: r.stats.frameChanged,
         bvhBuilds: r.stats.bvhBuilds, bvhNodes: r.stats.bvhNodes,
+        transformUs: r.stats.transformUs, cullUs: r.stats.cullUs, listUs: r.stats.listUs,
+        listRebuilt: r.stats.listRebuilt, dirtySlots: r.stats.dirtySlots,
       },
     };
   }

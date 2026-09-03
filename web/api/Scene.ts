@@ -15,7 +15,7 @@ export interface MeshData {
  *  decision: the demo/benchmark workloads build once. */
 export class Scene {
   readonly camera = new Camera();
-  cullStrategy = CullStrategy.Standard;
+  cullStrategy: CullStrategy = CullStrategy.Auto;
   sortByMesh = true;
 
   /** @internal */ _core: WasmCore;

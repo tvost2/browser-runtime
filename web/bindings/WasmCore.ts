@@ -21,13 +21,16 @@ interface WasmWorld {
   localMinPtr(): number; localMaxPtr(): number;
   meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; dirtyPtr(): number; viewProjPtr(): number;
   markAllDirty(): void;
-  evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean): number;
+  evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean, meshLayoutDirty: boolean): number;
   visibleIdPtr(): number; instanceWorldPtr(): number; instanceMeshIdPtr(): number;
   batchesPtr(): number; batchCount(): number;
   worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
   sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
+  sTransformUs(): number; sCullUs(): number; sListUs(): number;
+  sListRebuilt(): number; sDirtySlots(): number; dirtySlotsPtr(): number;
+  markMeshLayoutDirty(): void;
   raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
   raycastT(): number;
   queryBox(minx: number, miny: number, minz: number, maxx: number, maxy: number, maxz: number): number;
@@ -121,8 +124,9 @@ export class WasmCore {
   evaluate(strategy: CullStrategy = CullStrategy.Standard, sortByMesh = true): FrameResult {
     const w = this.world, m = this.mod;
     const bufBefore = m.HEAPU8.buffer;
-    const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty);
+    const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty, this._meshLayoutDirty);
     this._hierarchyDirty = false;
+    this._meshLayoutDirty = false;
     // evaluate() can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
     // swaps every HEAP* and detaches the cached component / viewProj views.
     if (m.HEAPU8.buffer !== bufBefore) this.refreshComponentViews();
@@ -139,12 +143,15 @@ export class WasmCore {
       instanceWorld: new Float32Array(m.HEAPF32.buffer, w.instanceWorldPtr(), visible * STRIDE.worldMatrix),
       instanceMeshId: new Uint32Array(m.HEAPU32.buffer, w.instanceMeshIdPtr(), visible),
       batches,
+      dirtySlots: w.sListRebuilt() ? null : new Uint32Array(m.HEAPU32.buffer, w.dirtySlotsPtr(), w.sDirtySlots()),
       stats: {
         visible: w.sVisible(), traversed: w.sTraversed(),
         culledDisabled: w.sCulledDisabled(), culledFrustum: w.sCulledFrustum(),
         batches: w.sBatches(), hierarchyRebuilds: w.sHierRebuilds(),
         transformsRecomputed: w.sTransformsRecomputed(), frameChanged: w.sFrameChanged(),
         bvhBuilds: w.sBvhBuilds(), bvhNodes: w.sBvhNodes(),
+        transformUs: w.sTransformUs(), cullUs: w.sCullUs(), listUs: w.sListUs(),
+        listRebuilt: w.sListRebuilt(), dirtySlots: w.sDirtySlots(),
       },
     };
   }
@@ -152,6 +159,12 @@ export class WasmCore {
   /** Mark every entity's transform dirty — forces a full recompute next
    *  evaluate(). Use after a bulk write that bypassed the Transform setters. */
   markAllDirty() { this.world.markAllDirty(); }
+
+  private _meshLayoutDirty = false;
+  /** Force the next evaluate() to rebuild the render list from scratch (a meshId
+   *  or visibility flag changed — the batch layout may differ even if the
+   *  visible set doesn't). JS-side flag — zero WASM calls; rides into evaluate(). */
+  markMeshLayoutDirty() { this._meshLayoutDirty = true; }
 
   /** Nearest entity whose world-space AABB the ray hits (BVH broadphase +
    *  precise slab test). `dir` need not be normalised. Returns the entity id and
