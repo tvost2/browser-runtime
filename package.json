@@ -4,9 +4,22 @@
   "private": true,
   "type": "module",
   "description": "A WASM-first 3D runtime experiment using C++, WebAssembly and WebGPU. The browser is the platform.",
-  "keywords": ["webassembly", "wasm", "webgpu", "cpp", "data-oriented", "ecs", "3d", "runtime", "experiment"],
+  "keywords": [
+    "webassembly",
+    "wasm",
+    "webgpu",
+    "cpp",
+    "data-oriented",
+    "ecs",
+    "3d",
+    "runtime",
+    "experiment"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/tvost2/browser-runtime.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tvost2/browser-runtime.git"
+  },
   "homepage": "https://github.com/tvost2/browser-runtime#readme",
   "exports": {
     ".": {
@@ -14,12 +27,13 @@
       "import": "./web/dist/engine.js"
     }
   },
-  "files": ["web/dist"],
+  "files": [
+    "web/dist"
+  ],
   "scripts": {
     "setup:emsdk": "node native/setup-emsdk.mjs",
     "setup:reference": "git clone --depth 1 https://github.com/BabylonJS/Babylon.js reference",
     "doctor": "node scripts/doctor.mjs",
-
     "build": "npm run build:wasm && npm run build:api",
     "build:wasm": "node native/build-wasm.mjs --profile release",
     "build:wasm:debug": "node native/build-wasm.mjs --profile debug --out engine-debug",
@@ -28,10 +42,14 @@
     "watch:api": "node web/build-api.mjs --watch",
     "serve": "node web/serve.mjs 8080",
     "demo": "npm run build && node web/serve.mjs 8080",
-
     "test:equivalence": "node bench/run-equivalence.mjs",
     "test:visual": "node bench/run-visual.mjs",
-
+    "test:glb": "node bench/run-glb-equiv.mjs",
+    "test:glb:render": "node bench/run-glb-render.mjs",
+    "bench:glb": "node --expose-gc bench/run-glb-bench.mjs",
+    "bench:glb:vitrine": "node --expose-gc bench/run-glb-vitrine.mjs",
+    "glb:fixtures": "node bench/make-glb-fixtures.mjs",
+    "glb:profile": "node --expose-gc bench/run-glb-profile.mjs",
     "bench:baseline": "node --expose-gc bench/run-baseline.mjs",
     "bench:wasm": "node --expose-gc bench/run-wasm.mjs",
     "bench:native": "node bench/native-ceiling.mjs",
@@ -41,13 +59,13 @@
     "bench:compare": "node --expose-gc bench/run-wasm.mjs && node --expose-gc bench/run-compare.mjs && node bench/report.mjs",
     "profile:pipeline": "node --expose-gc bench/profile-pipeline.mjs",
     "report": "node bench/report.mjs",
-
     "analyze": "node tools/migration-analyzer/analyze.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.0"
   },
   "devDependencies": {
+    "@babylonjs/loaders": "^7.54.3",
     "@webgpu/types": "^0.1.72",
     "esbuild": "^0.28.2",
     "playwright": "^1.48.0",

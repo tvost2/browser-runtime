@@ -49,6 +49,7 @@ const args = [
   "-std=c++20", ...opt,
   "-I", join(nativeDir, "include"),
   join(nativeDir, "bindings", "engine.cpp"),
+  join(nativeDir, "bindings", "asset.cpp"),
   "--bind",
   "-sMODULARIZE=1", "-sEXPORT_ES6=1", `-sEXPORT_NAME=createEngine`,
   "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=67108864", "-sMAXIMUM_MEMORY=1073741824",

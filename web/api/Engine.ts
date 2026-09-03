@@ -70,6 +70,7 @@ export class Engine {
 
   createScene(): Scene {
     const s = new Scene(this.core);
+    s._renderer = this.renderer;
     this.scenes.push(s);
     return s;
   }

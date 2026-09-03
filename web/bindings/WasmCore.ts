@@ -8,6 +8,7 @@
 // `resize()` can grow the heap here, so views are refreshed right after it.
 
 import { STRIDE, CullStrategy, type FrameResult, type RenderBatch } from "../../shared/layout.js";
+import { loadEngineModule } from "./module.js";
 
 type EmModule = {
   HEAPF32: Float32Array; HEAPU32: Uint32Array; HEAP32: Int32Array; HEAPU8: Uint8Array;
@@ -45,12 +46,9 @@ export class WasmCore {
   initMs = 0;
 
   static async create(wasmUrl?: string): Promise<WasmCore> {
-    // default: the emscripten loader sitting next to this module (dist/engine.mjs)
-    const url = wasmUrl ?? new URL("./engine.mjs", import.meta.url).href;
     const t0 = performance.now();
-    const { default: factory } = await import(/* @vite-ignore */ /* webpackIgnore: true */ url);
     const c = new WasmCore();
-    c.mod = await factory();
+    c.mod = await loadEngineModule(wasmUrl) as unknown as EmModule;
     c.world = new c.mod.World();
     c.initMs = performance.now() - t0;
     return c;
