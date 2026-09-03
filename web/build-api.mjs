@@ -35,7 +35,9 @@ const opts = {
   format: "esm",
   target: "es2022",
   outfile: join(dist, "engine.js"),
-  external: ["./engine.mjs"],      // emscripten loader stays a sibling file
+  // emscripten loader stays a sibling file; node: builtins are for the Node-only
+  // asset-loading branch (tests) and are never reached in the browser.
+  external: ["./engine.mjs", "node:*"],
   banner: { js: "// bcpp engine — generated bundle, do not edit\n" },
   logLevel: "info",
 };

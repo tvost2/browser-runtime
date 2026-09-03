@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "esModuleInterop": true
   },
-  "include": ["api/**/*.ts", "bindings/**/*.ts", "renderer/**/*.ts", "../shared/**/*.ts"]
+  "include": ["api/**/*.ts", "bindings/**/*.ts", "renderer/**/*.ts", "asset/**/*.ts", "../shared/**/*.ts"]
 }
