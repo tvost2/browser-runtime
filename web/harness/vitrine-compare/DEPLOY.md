@@ -13,12 +13,12 @@ Atomic swap (no half-served state, keeps a rollback):
 
 ```
 cd web/harness/vitrine-compare/dist
-D=/opt/sitefactory/deploy
-tar czf - . | ssh mytheria@192.168.100.127 "rm -rf $D/3dviewer.new && mkdir -p $D/3dviewer.new \
-  && tar xzf - -C $D/3dviewer.new \
+tar czf - . | ssh mytheria@192.168.100.127 'D=/opt/sitefactory/deploy; \
+  rm -rf $D/3dviewer.new && mkdir -p $D/3dviewer.new && tar xzf - -C $D/3dviewer.new \
   && rm -rf $D/3dviewer.old \
-  && mv $D/3dviewer $D/3dviewer.old && mv $D/3dviewer.new $D/3dviewer"
+  && mv $D/3dviewer $D/3dviewer.old && mv $D/3dviewer.new $D/3dviewer'
 ```
+(the var must be set *inside* the remote single-quoted script, not locally)
 Rollback: `mv 3dviewer 3dviewer.bad && mv 3dviewer.old 3dviewer` in `/opt/sitefactory/deploy/`.
 
 ## 1. Build the bundle (on this machine)
