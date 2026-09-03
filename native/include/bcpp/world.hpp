@@ -11,13 +11,14 @@
 
 #pragma once
 #include "math.hpp"
+#include "bvh.hpp"
 #include <vector>
 #include <cstdint>
 #include <algorithm>
 
 namespace bcpp {
 
-enum class CullStrategy : uint32_t { Standard = 0, BoundingSphereOnly = 1, None = 2 };
+enum class CullStrategy : uint32_t { Standard = 0, BoundingSphereOnly = 1, None = 2, Bvh = 3 };
 
 // flag bits (mirror web/shared/flags.ts)
 enum EntityFlags : uint32_t {
@@ -37,6 +38,8 @@ struct EvalStats {
     uint32_t hierarchyRebuilds = 0;
     uint32_t transformsRecomputed = 0;  // entities whose world matrix was (re)computed this frame
     uint32_t frameChanged = 1;          // 0 = nothing moved AND camera unchanged → render list reused
+    uint32_t bvhBuilds = 0;             // 1 if the spatial index was rebuilt this frame (0 = refit or reused)
+    uint32_t bvhNodes = 0;
 };
 
 struct Batch { uint32_t meshId; uint32_t firstInstance; uint32_t instanceCount; };
@@ -110,9 +113,10 @@ public:
         count = n;
         _hierarchyDirty = true;
     }
-    void markHierarchyDirty() { _hierarchyDirty = true; }
+    void markHierarchyDirty() { _hierarchyDirty = true; _bvhDirty = true; }
     void markDirty(uint32_t i) { if (i < dirty.size()) dirty[i] = 1; }
     void markAllDirty() { std::fill(dirty.begin(), dirty.begin() + std::min<size_t>(count, dirty.size()), 1); }
+    void markSpatialDirty() { _bvhDirty = true; }   // force a BVH rebuild (e.g. flags changed)
 
     // One per-frame call. Transforms are recomputed only for entities whose local
     // transform changed (JS sets dirty[i]) or whose ancestor moved — the topo
@@ -171,25 +175,52 @@ public:
             return;
         }
 
-        // --- cull pass: visits every entity, cheap per-entity ---
+        // --- cull pass ---
         const Frustum fr = Frustum::fromViewProj(viewProj);
         visibleId.clear();
-        for (uint32_t k = 0; k < count; ++k) {
-            const uint32_t i = _order[k];
-            stats.traversed++;
-            const uint32_t fl = flags[i];
-            if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { stats.culledDisabled++; continue; }
-            if (strat != CullStrategy::None && !(fl & F_ALWAYS_ACTIVE)) {
-                const Vec4 s = worldSphere[i];
-                const Vec3 center{s.x, s.y, s.z};
-                bool inside = true;
-                for (int pl = 0; pl < 6; ++pl)
-                    if (fr.planes[pl].dotCoordinate(center) <= -s.w) { inside = false; break; }
-                if (inside && strat == CullStrategy::Standard)
-                    inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
-                if (!inside) { stats.culledFrustum++; continue; }
+
+        if (strat == CullStrategy::Bvh) {
+            // sub-linear: traverse the spatial index, prune whole subtrees
+            if (_bvhDirty || structChanged || _bvh.empty()) {
+                _bvh.build(worldMin.data(), worldMax.data(), count);
+                _bvhDirty = false;
+                stats.bvhBuilds = 1;
+            } else if (recomputed > 0) {
+                _bvh.refit(worldMin.data(), worldMax.data());
             }
-            visibleId.push_back(i);
+            stats.bvhNodes = _bvh.nodeCount;
+            _bvh.frustumCull(fr, [&](uint32_t i, bool fullyInside) {
+                stats.traversed++;
+                const uint32_t fl = flags[i];
+                if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { stats.culledDisabled++; return; }
+                if (!fullyInside && !(fl & F_ALWAYS_ACTIVE)) {
+                    const Vec4 s = worldSphere[i];
+                    bool inside = true;
+                    for (int pl = 0; pl < 6; ++pl)
+                        if (fr.planes[pl].dotCoordinate({s.x, s.y, s.z}) <= -s.w) { inside = false; break; }
+                    if (inside) inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
+                    if (!inside) { stats.culledFrustum++; return; }
+                }
+                visibleId.push_back(i);
+            });
+        } else {
+            for (uint32_t k = 0; k < count; ++k) {
+                const uint32_t i = _order[k];
+                stats.traversed++;
+                const uint32_t fl = flags[i];
+                if (!(fl & F_ENABLED) || !(fl & F_VISIBLE)) { stats.culledDisabled++; continue; }
+                if (strat != CullStrategy::None && !(fl & F_ALWAYS_ACTIVE)) {
+                    const Vec4 s = worldSphere[i];
+                    const Vec3 center{s.x, s.y, s.z};
+                    bool inside = true;
+                    for (int pl = 0; pl < 6; ++pl)
+                        if (fr.planes[pl].dotCoordinate(center) <= -s.w) { inside = false; break; }
+                    if (inside && strat == CullStrategy::Standard)
+                        inside = boxInFrustum(fr, worldMin[i], worldMax[i]);
+                    if (!inside) { stats.culledFrustum++; continue; }
+                }
+                visibleId.push_back(i);
+            }
         }
         stats.visible = static_cast<uint32_t>(visibleId.size());
 
@@ -218,10 +249,59 @@ private:
     std::vector<int32_t>  _depth;
     std::vector<uint64_t> _sortKeys;
     std::vector<uint8_t>  _recomputed;
+    Bvh _bvh;
     bool _hierarchyDirty = true;
+    bool _bvhDirty = true;
     uint32_t _prevCount = 0;
     Mat4 _lastViewProj{};
     bool _hasLastViewProj = false;
+
+public:
+    // ---- spatial queries (BVH-accelerated; build/refit happens in evaluate()
+    //      when CullStrategy::Bvh is used, or call ensureSpatialIndex()) ----
+    void ensureSpatialIndex() {
+        if (_bvhDirty || _bvh.empty()) { _bvh.build(worldMin.data(), worldMax.data(), count); _bvhDirty = false; }
+    }
+    const Bvh& bvh() const { return _bvh; }
+
+    // Closest entity whose world AABB the ray hits. Returns UINT32_MAX if none.
+    // `d` need not be normalised; `outT` is the hit distance along `d`.
+    uint32_t raycast(Vec3 o, Vec3 d, float maxT, float& outT) {
+        ensureSpatialIndex();
+        outT = maxT;
+        uint32_t hit = UINT32_MAX;
+        const Vec3 inv{1.0f / d.x, 1.0f / d.y, 1.0f / d.z};
+        _bvh.raycastLeaves(o, d, maxT, [&](uint32_t e) {
+            if (!(flags[e] & F_ENABLED)) return;
+            float t;
+            if (raySlab(o, inv, worldMin[e], worldMax[e], outT, t) && t < outT) { outT = t; hit = e; }
+        });
+        return hit;
+    }
+
+    // Entity slots whose world AABB overlaps the query box. Appends to `out`.
+    void queryBox(Vec3 qmin, Vec3 qmax, std::vector<uint32_t>& out) {
+        ensureSpatialIndex();
+        _bvh.queryBox(qmin, qmax, [&](uint32_t e) {
+            if (!(flags[e] & F_ENABLED)) return;
+            const Vec3 a = worldMin[e], b = worldMax[e];
+            if (a.x <= qmax.x && b.x >= qmin.x && a.y <= qmax.y && b.y >= qmin.y && a.z <= qmax.z && b.z >= qmin.z)
+                out.push_back(e);
+        });
+    }
+
+private:
+    static bool raySlab(Vec3 o, Vec3 inv, Vec3 mn, Vec3 mx, float maxT, float& tHit) {
+        float t0 = (mn.x - o.x) * inv.x, t1 = (mx.x - o.x) * inv.x;
+        float tmin = t0 < t1 ? t0 : t1, tmax = t0 > t1 ? t0 : t1;
+        t0 = (mn.y - o.y) * inv.y; t1 = (mx.y - o.y) * inv.y;
+        tmin = std::max(tmin, t0 < t1 ? t0 : t1); tmax = std::min(tmax, t0 > t1 ? t0 : t1);
+        t0 = (mn.z - o.z) * inv.z; t1 = (mx.z - o.z) * inv.z;
+        tmin = std::max(tmin, t0 < t1 ? t0 : t1); tmax = std::min(tmax, t0 > t1 ? t0 : t1);
+        if (tmax < tmin || tmax < 0 || tmin > maxT) return false;
+        tHit = tmin >= 0 ? tmin : 0;
+        return true;
+    }
 
     bool _cameraChanged(const Mat4& vp) {
         bool same = _hasLastViewProj;

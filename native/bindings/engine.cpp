@@ -69,6 +69,26 @@ struct WasmWorld {
     uint32_t sHierRebuilds()  { return w.stats.hierarchyRebuilds; }
     uint32_t sTransformsRecomputed() { return w.stats.transformsRecomputed; }
     uint32_t sFrameChanged() { return w.stats.frameChanged; }
+    uint32_t sBvhBuilds()    { return w.stats.bvhBuilds; }
+    uint32_t sBvhNodes()     { return w.stats.bvhNodes; }
+
+    // ---- spatial queries ----
+    float _rayT = 0;
+    int raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxT) {
+        float t;
+        uint32_t hit = w.raycast({ox, oy, oz}, {dx, dy, dz}, maxT, t);
+        _rayT = t;
+        return hit == UINT32_MAX ? -1 : (int)hit;
+    }
+    float raycastT() { return _rayT; }
+
+    std::vector<uint32_t> _queryResult;
+    uint32_t queryBox(float minx, float miny, float minz, float maxx, float maxy, float maxz) {
+        _queryResult.clear();
+        w.queryBox({minx, miny, minz}, {maxx, maxy, maxz}, _queryResult);
+        return (uint32_t)_queryResult.size();
+    }
+    int queryResultPtr() { return P(_queryResult.data()); }  // u32 x (last queryBox return)
 };
 
 } // namespace
@@ -107,6 +127,12 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("sBatches", &WasmWorld::sBatches)
         .function("sHierRebuilds", &WasmWorld::sHierRebuilds)
         .function("sTransformsRecomputed", &WasmWorld::sTransformsRecomputed)
-        .function("sFrameChanged", &WasmWorld::sFrameChanged);
+        .function("sFrameChanged", &WasmWorld::sFrameChanged)
+        .function("sBvhBuilds", &WasmWorld::sBvhBuilds)
+        .function("sBvhNodes", &WasmWorld::sBvhNodes)
+        .function("raycast", &WasmWorld::raycast)
+        .function("raycastT", &WasmWorld::raycastT)
+        .function("queryBox", &WasmWorld::queryBox)
+        .function("queryResultPtr", &WasmWorld::queryResultPtr);
 }
 #endif

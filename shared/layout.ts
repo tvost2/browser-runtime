@@ -32,6 +32,7 @@ export const CullStrategy = {
   Standard: 0,          // sphere reject, then 8-corner box reject (Babylon default)
   BoundingSphereOnly: 1,
   None: 2,
+  Bvh: 3,              // traverse the spatial index — sub-linear; best for large mostly-static scenes
 } as const;
 export type CullStrategy = (typeof CullStrategy)[keyof typeof CullStrategy];
 
