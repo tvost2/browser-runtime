@@ -29,12 +29,12 @@
         [
           "A-wasm: depth headroom",
           true,
-          "z=0.9920"
+          "z=0.9942"
         ],
         [
           "A-wasm: not black (PNG > 9 KB)",
           true,
-          "14 KB"
+          "15 KB"
         ],
         [
           "A-wasm: no GPU errors",
@@ -69,7 +69,7 @@
         [
           "B-native: depth headroom",
           true,
-          "z=0.9942"
+          "z=0.9921"
         ],
         [
           "B-native: not black (PNG > 9 KB)",
@@ -104,17 +104,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0020"
+          "Δ=0.0016"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 62,
-          "cpuFrameMs": 0.6556347177765438,
-          "evalMs": 0.1267659934334924,
-          "gpuMs": 0.0753,
-          "fps": 1525.2395470930876,
+          "frame": 63,
+          "cpuFrameMs": 0.4810496017403163,
+          "evalMs": 0.09502885130596866,
+          "gpuMs": 0.0619,
+          "fps": 2078.7877100038163,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -153,16 +153,16 @@
         "far": 7.0710678118654755,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9919751567588204
+        "ndcZMedian": 0.9942128088814413
       },
       "b": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.616285136635618,
-          "evalMs": 0.11040262790582063,
-          "gpuMs": 0.0916,
-          "fps": 1622.6255357368054,
+          "cpuFrameMs": 0.407579513917936,
+          "evalMs": 0.07374485815756592,
+          "gpuMs": 0.0595,
+          "fps": 2453.508986227764,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -201,9 +201,9 @@
         "far": 7.0710678118654755,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9942128088814413
+        "ndcZMedian": 0.99206786946361
       },
-      "pixelDelta": 0.0019529411764705883
+      "pixelDelta": 0.0016469135802469137
     },
     {
       "fx": "two-boxes.glb",
@@ -232,7 +232,7 @@
         [
           "A-wasm: depth headroom",
           true,
-          "z=0.9912"
+          "z=0.9931"
         ],
         [
           "A-wasm: not black (PNG > 9 KB)",
@@ -307,17 +307,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0021"
+          "Δ=0.0018"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.41397295486284275,
-          "evalMs": 0.07405435307125623,
-          "gpuMs": 0.6492,
-          "fps": 2415.6167407876183,
+          "cpuFrameMs": 0.3295061034574079,
+          "evalMs": 0.05653374618373266,
+          "gpuMs": 0.8199,
+          "fps": 3034.845150081599,
           "visible": 2,
           "entities": 2,
           "batches": 1,
@@ -356,16 +356,16 @@
         "far": 15.461646096066225,
         "onScreen": 2,
         "visible": 2,
-        "ndcZMedian": 0.9911969833358892
+        "ndcZMedian": 0.9930856688429446
       },
       "b": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.49304276112176887,
-          "evalMs": 0.0883187710265225,
-          "gpuMs": 0.5759,
-          "fps": 2028.2216449640273,
+          "cpuFrameMs": 0.41607263667808825,
+          "evalMs": 0.07163567308632081,
+          "gpuMs": 0.6869,
+          "fps": 2403.426497796084,
           "visible": 2,
           "entities": 2,
           "batches": 1,
@@ -406,7 +406,7 @@
         "visible": 2,
         "ndcZMedian": 0.9930856688429446
       },
-      "pixelDelta": 0.0021470588235294116
+      "pixelDelta": 0.0017582425562817719
     },
     {
       "fx": "real/Box.glb",
@@ -435,7 +435,7 @@
         [
           "A-wasm: depth headroom",
           true,
-          "z=0.9928"
+          "z=0.9889"
         ],
         [
           "A-wasm: not black (PNG > 9 KB)",
@@ -510,17 +510,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0013"
+          "Δ=0.0023"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.4675154254347387,
-          "evalMs": 0.08381211503094174,
-          "gpuMs": 1.1596,
-          "fps": 2138.9668566980617,
+          "cpuFrameMs": 0.4476493856895184,
+          "evalMs": 0.08307192772316684,
+          "gpuMs": 1.3686,
+          "fps": 2233.891147777833,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -559,16 +559,16 @@
         "far": 8.660255414354749,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.992837389266046
+        "ndcZMedian": 0.9888940725407448
       },
       "b": {
         "gpuErr": null,
         "stats": {
           "frame": 62,
-          "cpuFrameMs": 0.4707596788076869,
-          "evalMs": 0.09399709083128563,
-          "gpuMs": 0.9972,
-          "fps": 2124.226107326657,
+          "cpuFrameMs": 0.5426330107586924,
+          "evalMs": 0.09446093267296003,
+          "gpuMs": 1.4595,
+          "fps": 1842.866136363196,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -609,7 +609,7 @@
         "visible": 1,
         "ndcZMedian": 0.9888940725407448
       },
-      "pixelDelta": 0.001303848946986202
+      "pixelDelta": 0.0023162672476397966
     },
     {
       "fx": "real/BoxTextured.glb",
@@ -713,17 +713,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0021"
+          "Δ=0.0016"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 63,
-          "cpuFrameMs": 0.49686422168924294,
-          "evalMs": 0.09275264005573844,
-          "gpuMs": 2.9157,
-          "fps": 2012.622274552577,
+          "frame": 62,
+          "cpuFrameMs": 0.4316199142010894,
+          "evalMs": 0.07469070056963889,
+          "gpuMs": 2.5772,
+          "fps": 2316.8532477259732,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -768,10 +768,10 @@
         "gpuErr": null,
         "stats": {
           "frame": 63,
-          "cpuFrameMs": 0.5609316314108221,
-          "evalMs": 0.10717271812163237,
-          "gpuMs": 2.0483,
-          "fps": 1782.7484563223134,
+          "cpuFrameMs": 0.4355844194503974,
+          "evalMs": 0.06860608163049617,
+          "gpuMs": 2.6384,
+          "fps": 2295.7662288787997,
           "visible": 1,
           "entities": 2,
           "batches": 1,
@@ -812,7 +812,7 @@
         "visible": 1,
         "ndcZMedian": 0.9888940725407448
       },
-      "pixelDelta": 0.0020970225127087874
+      "pixelDelta": 0.0016334785766158315
     },
     {
       "fx": "real/DamagedHelmet.glb",
@@ -886,7 +886,7 @@
         [
           "B-native: not black (PNG > 9 KB)",
           true,
-          "92 KB"
+          "94 KB"
         ],
         [
           "B-native: no GPU errors",
@@ -916,17 +916,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0106"
+          "Δ=0.0040"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
-          "frame": 58,
-          "cpuFrameMs": 13.782368122615823,
-          "evalMs": 0.21957010575741248,
-          "gpuMs": 11.2822,
-          "fps": 72.5564715079026,
+          "frame": 68,
+          "cpuFrameMs": 0.7850013546079679,
+          "evalMs": 0.0744975590288964,
+          "gpuMs": 8.6514,
+          "fps": 1273.8831520862827,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -969,16 +969,16 @@
         "far": 16.446140696949662,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9886431497359776
+        "ndcZMedian": 0.9886321299244605
       },
       "b": {
         "gpuErr": null,
         "stats": {
-          "frame": 72,
-          "cpuFrameMs": 1.5317079173711554,
-          "evalMs": 0.09129123571128907,
-          "gpuMs": 18.0539,
-          "fps": 652.8659861707075,
+          "frame": 70,
+          "cpuFrameMs": 2.474614688478441,
+          "evalMs": 0.2783243220464843,
+          "gpuMs": 14.7109,
+          "fps": 404.10331541952786,
           "visible": 1,
           "entities": 1,
           "batches": 1,
@@ -1021,9 +1021,9 @@
         "far": 16.446140696949662,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9886054477354945
+        "ndcZMedian": 0.9886145289196836
       },
-      "pixelDelta": 0.010642992011619463
+      "pixelDelta": 0.0040270878721859115
     },
     {
       "fx": "real/Duck.glb",
@@ -1127,17 +1127,17 @@
         [
           "A/B: screenshots match (mean channel Δ < 0.03)",
           true,
-          "Δ=0.0022"
+          "Δ=0.0012"
         ]
       ],
       "a": {
         "gpuErr": null,
         "stats": {
           "frame": 63,
-          "cpuFrameMs": 0.4129781960409574,
-          "evalMs": 0.073438033446792,
-          "gpuMs": 3.9603,
-          "fps": 2421.4353435279772,
+          "cpuFrameMs": 0.6319278366335492,
+          "evalMs": 0.08764676881881917,
+          "gpuMs": 4.1615,
+          "fps": 1582.459170223092,
           "visible": 1,
           "entities": 3,
           "batches": 1,
@@ -1178,16 +1178,16 @@
         "far": 50.47014530916104,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9904434514860271
+        "ndcZMedian": 0.9904202952927665
       },
       "b": {
         "gpuErr": null,
         "stats": {
-          "frame": 63,
-          "cpuFrameMs": 0.525694363931373,
-          "evalMs": 0.09796147796241046,
-          "gpuMs": 4.4035,
-          "fps": 1902.245998076832,
+          "frame": 64,
+          "cpuFrameMs": 0.4344933583259194,
+          "evalMs": 0.0780962155122835,
+          "gpuMs": 3.7851,
+          "fps": 2301.531153095064,
           "visible": 1,
           "entities": 3,
           "batches": 1,
@@ -1228,9 +1228,9 @@
         "far": 50.47014530916104,
         "onScreen": 1,
         "visible": 1,
-        "ndcZMedian": 0.9903903554881689
+        "ndcZMedian": 0.99039142911383
       },
-      "pixelDelta": 0.002216485112563544
+      "pixelDelta": 0.0012469862018881627
     }
   ]
 }
