@@ -1,9 +1,13 @@
 {
-  "name": "bcpp-engine",
+  "name": "browser-runtime",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "WASM-first 3D runtime: TypeScript API → C++/WASM core → WebGPU. Built progressively on measured Babylon.js hot paths.",
+  "description": "A WASM-first 3D runtime experiment using C++, WebAssembly and WebGPU. The browser is the platform.",
+  "keywords": ["webassembly", "wasm", "webgpu", "cpp", "data-oriented", "ecs", "3d", "runtime", "experiment"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/tvost2/browser-runtime.git" },
+  "homepage": "https://github.com/tvost2/browser-runtime#readme",
   "exports": {
     ".": {
       "types": "./web/dist/types/web/api/index.d.ts",

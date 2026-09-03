@@ -70,7 +70,7 @@ function frame() {
   acc += st.cpuFrameMs; accE += st.evalMs; accN++;
   if (accN >= 20) {
     hud.innerHTML =
-      `<b>bcpp engine</b>  ·  ${MODE}  ·  ${COUNT.toLocaleString()} entities\n` +
+      `<b>browser-runtime</b>  ·  ${MODE}  ·  ${COUNT.toLocaleString()} entities\n` +
       `fps            <b>${fmt(st.fps, 0)}</b>\n` +
       `visible        ${st.visible.toLocaleString()} / ${st.entities.toLocaleString()}  (${fmt(100 * st.visible / st.entities, 0)}%)\n` +
       `eval (WASM)    <b>${fmt(accE / accN, 3)} ms</b>   ← 1 boundary crossing/frame\n` +

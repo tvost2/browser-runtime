@@ -4,7 +4,7 @@
 > renderer — nothing else (see *Known Limitations* in `README.md`).
 
 ```ts
-import { Engine, box, sphere } from "bcpp-engine";
+import { Engine, box, sphere } from "browser-runtime";
 
 const engine = await Engine.create(canvas);        // loads engine.wasm + WebGPU
 const scene  = engine.createScene();
