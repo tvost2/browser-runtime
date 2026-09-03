@@ -8,6 +8,55 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-016 · One per-frame WASM→WebGPU upload — C++ lays out the frame block
+Branch `feat/gpu-frame-block` (off `feat/gpu-driven-cull`).
+`npm run bench:gpu-cull` · `npm run test:equivalence` · `npm run test:render:patch`
+
+`CullStrategy.Gpu` split each frame's fixed CPU→GPU handoff into **four small
+`writeBuffer` calls** — camera (64 B), cull head (16 B), frustum planes (96 B,
+computed in JS every frame), xform uniform (16 B) — each into its own uniform
+buffer, plus a per-frame array-of-arrays allocation in `writePlanes()`.
+
+Now C++ owns a single `GpuFrameBlock` (176 B) laid out in its own memory in the
+exact WGSL std140 order:
+
+```
+  0   mat4x4<f32>  viewProj
+ 64   array<vec4,6> planes      // frustum, normalised, Babylon order — Frustum::fromViewProj
+160   u32          count, numBuckets, maxDepth, _pad
+```
+
+filled inside `evaluate()` (Gpu branch). The renderer does **one**
+`writeBuffer(gFrameU, 0, gpu.frame)` per frame and the three shaders (xform,
+cull, render) all bind that one uniform at `@group(0) @binding(0)` as `Frame`.
+
+Removed from the JS hot path, per frame:
+- 3 of 4 `writeBuffer` calls (driver + staging-copy each)
+- `writePlanes()` — 6× Gribb-Hartmann rows + `hypot` normalise, **and** its
+  `rows` array-of-6-arrays allocation
+- `new Uint32Array(4)` (cull head) + `new Uint32Array([...])` (xform uniform)
+
+≈ 8 short-lived allocations/frame gone → less GC churn (the camera-move stutter
+lever), plus the plane math moves to C++ where it's the *same* code path as the
+CPU cull (`Frustum::fromViewProj`) instead of a parallel JS reimplementation.
+
+**Equivalence held** — `bench:gpu-cull`, 60k moving camera: GPU misses 0,
+over-draws 19 / 32988 (0.058 %), identical to pre-change (the C++ planes match
+the old JS planes bit-for-practical-purposes). Many-bucket guard, `test:visual`,
+`test:render:patch` all green; no WebGPU validation errors across static / camera
+/ transform Gpu runs. WARP per-frame times are submit-bound and unchanged in the
+noise; the win is call count + allocation count, which show on a real GPU.
+
+### Not built (next)
+- **chunk merge** — the twin's ~3.7k unique building meshes = ~3.7k
+  `drawIndexedIndirect` + 3.7k `setBindGroup` (dynamic offset) per frame. WebGPU
+  has no multi-draw / `draw_index`, so the only way to collapse it is fewer,
+  bigger buckets: a C++ geometry merge (`mergeMeshes(meshes[], transforms[])` —
+  SoA concat + index rebase) grouping buildings by spatial cell → ~50 buckets.
+  That's the real FPS lever for the many-unique-mesh case.
+
+---
+
 ## F-014 · GPU upload — the two costs, and moving them off the CPU
 Branch `feat/gpu-driven-cull` (off `feat/incremental-renderer`).
 `npm run bench:mesh-upload` · `npm run bench:gpu-cull`
