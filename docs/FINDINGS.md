@@ -8,6 +8,67 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-010 · GLB — the loader belongs entirely in JavaScript (PROFILE + HYPOTHESIS)
+`node bench/make-glb-fixtures.mjs && node --expose-gc bench/run-glb-profile.mjs`
+Cycle: [docs/investigations/glb.md](investigations/glb.md). Branch `feat/glb-loader`.
+
+**PROFILE** — raw cost of what a loader must do, before any loader exists:
+
+| fixture | size | JSON % of file | `JSON.parse` | naive accessor decode | verts |
+|---|---|---|---|---|---|
+| tri (hand-authored) | 0.8 KB | 87 % | 0.02 ms | 0.02 ms | 3 |
+| two-boxes (hand-authored) | 2 KB | 57 % | 0.04 ms | 0.01 ms | 24 |
+| Box (Khronos) | 2 KB | 59 % | 0.03 ms | 0.01 ms | 24 |
+| BoxTextured | 6 KB | 22 % | 0.04 ms | 0.02 ms | 24 |
+| Duck | 118 KB | 2 % | 0.06 ms | 0.82 ms | 2 399 |
+| DamagedHelmet | 3.7 MB | ~0 % | 0.05 ms | 5.0 ms | 14 556 |
+
+- **`JSON.parse` is free** — 0.02–0.06 ms regardless of file size. The JSON chunk
+  is metadata; the bytes live in the BIN chunk. → parse in JS.
+- The "decode" column is the **pessimistic** path (per-element `DataView`
+  reads). For the common case — accessors that are non-interleaved and already
+  `FLOAT`/`UNSIGNED_SHORT` — the decode is a **zero-copy `new Float32Array(bin,
+  offset, len)`**, i.e. ~0 ms. A copy is only needed for interleaved data,
+  normalized ints, or `UNSIGNED_BYTE` indices.
+- Embedded images (PNG/JPEG in BIN) — decode is a browser codec job
+  (`createImageBitmap`), not ours. We slice the bytes.
+- Geometry does **not** need to enter WASM linear memory: it goes straight to
+  GPU buffers. The C++ core only needs the per-mesh local AABB (cheap, from the
+  accessor `min`/`max` when present).
+
+**HYPOTHESIS** — the minimal GLB loader (nodes, transforms, mesh primitives,
+indices, POSITION/NORMAL/TEXCOORD_0, `baseColorFactor` + one texture) is
+**100 % JavaScript**. WASM stays out of it. This matches the project rule
+(Phase 35): use JS when parsing is cheap and the boundary cost is irrelevant.
+The only future WASM candidates: `ComputeNormals`/tangents for GLBs that omit
+them, and Draco / meshopt / KTX2 decompression — none in this pass; each gets
+its own PROFILE → HYPOTHESIS later.
+
+**DESIGN** — loader (`web/asset/{glb,gltf}.ts` + `Asset`) has **zero** imports of
+the renderer or WASM. `AssetManager.instantiate(asset, scene)` is the only
+bridge: Asset → `scene.createEntity()` + `renderer.registerMesh()`. Geometry
+reaches the GPU there, never before.
+
+**IMPLEMENT** — `web/asset/{glb,gltf,Asset,AssetManager}.ts` + `scene.loadAsset(url)`.
+The loader is pure JS with zero renderer/WASM imports (runs in Node).
+
+**VALIDATE (decode)** — `npm run test:glb`: **60/60**.
+- hand-authored `tri.glb` / `two-boxes.glb` checked against exact known values:
+  node count/names/hierarchy, topological order, TRS, positions, normals,
+  indices (widened u16→u32), AABB (from accessor min/max), material factors,
+  UVs, shared-mesh-not-duplicated, zero-copy views.
+- Khronos `Box` / `BoxTextured` / `Duck` / `DamagedHelmet`: structural sanity
+  (topological nodes, in-range indices, sane AABB) + **vertex count matches
+  `@babylonjs/loaders`** (Duck 2399, DamagedHelmet 14556).
+- unsupported input is surfaced in `asset.ignored[]`, not dropped: Duck's
+  camera, DamagedHelmet's normal/occlusion/metallicRoughness textures.
+
+Still open in this cycle: VALIDATE (render — a browser test that instantiates a
+fixture and renders it), BENCHMARK (download/parse/decode/GPU-upload/first-frame),
+DECIDE.
+
+---
+
 ## F-009 · Bug caught: far/near ratio destroyed depth precision (black screen)
 `bench/test-engine-browser.mjs` visual check
 

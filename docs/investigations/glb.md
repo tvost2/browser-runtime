@@ -1,8 +1,42 @@
 # Investigation: GLB / glTF loader
 
-**Status: design only. Nothing implemented.** This document is the "before any
-code" work required by [../ROADMAP.md](../ROADMAP.md). It will gain a
-`## Conclusion` section once the cycle completes.
+**Branch:** `feat/glb-loader` (off `develop`). **Status:**
+
+| step | state |
+|---|---|
+| PROFILE | ✅ [FINDINGS F-010](../FINDINGS.md#f-010--glb--the-loader-belongs-entirely-in-javascript-profile--hypothesis) · `npm run glb:profile` |
+| HYPOTHESIS | ✅ the minimal loader is 100 % JavaScript; WASM stays out |
+| DESIGN | ✅ decisions below |
+| IMPLEMENT | ✅ `web/asset/` — `glb.ts` (container) · `gltf.ts` (decode → `Asset`) · `Asset.ts` · `AssetManager.ts` (instantiate) · `scene.loadAsset(url)` |
+| VALIDATE (decode) | ✅ `npm run test:glb` — **60/60**: hand-authored fixtures vs exact known values + Khronos fixtures cross-checked against `@babylonjs/loaders` (vertex counts match) |
+| VALIDATE (render) | 🚧 browser test: fixture GLB → `AssetManager.instantiate` → WebGPU → structural checks |
+| BENCHMARK | ⬜ download / parse / decode / GPU upload / first frame / steady-state, small→large |
+| DECIDE | ⬜ |
+
+It will gain a `## Conclusion` section once the cycle completes.
+
+## Decisions (from PROFILE)
+
+1. **Parsing runs in JS.** `JSON.parse` is 0.02–0.06 ms for any file size (the
+   JSON chunk is metadata). No reason to marshal it into WASM.
+2. **Accessors are zero-copy where possible.** Non-interleaved `FLOAT` / `UNSIGNED_SHORT`
+   accessor → `new Float32Array(bin, byteOffset, count*comps)` view, no decode.
+   A copy happens only for: interleaved data (`byteStride`), normalized ints,
+   `UNSIGNED_BYTE` indices (→ Uint16), sparse accessors.
+3. **Geometry does not enter WASM.** It goes `bin bytes → GPUBuffer` via
+   `queue.writeBuffer`. The C++ `World` only needs the per-mesh local AABB
+   (accessor `min`/`max`, or recomputed once).
+4. **Images stay bytes until upload.** `Asset.images[]` holds `{ mimeType, bytes }`;
+   `createImageBitmap` + `copyExternalImageToTexture` happen in the renderer.
+5. **glTF subset for this pass:** `mode: 4` primitives; accessors
+   SCALAR/VEC2/VEC3/VEC4 with componentType FLOAT / UNSIGNED_SHORT /
+   UNSIGNED_INT / UNSIGNED_BYTE; attributes POSITION, NORMAL, TEXCOORD_0,
+   COLOR_0; nodes with TRS or `matrix`; `pbrMetallicRoughness` (baseColorFactor,
+   baseColorTexture, metallicFactor, roughnessFactor); `alphaMode`,
+   `doubleSided`. **Out:** animations, skins, morph targets, cameras/lights,
+   all `KHR_*` / `EXT_*` extensions, sparse accessors (parse-time error, not
+   silent).
+6. **`Asset` is immutable + GPU-free + WASM-free** — fully unit-testable in Node.
 
 ## Goal
 
@@ -26,7 +60,37 @@ Minimal first pass:
 GLB → nodes → transforms → mesh primitives → indices → positions → basic material → WebGPU
 ```
 
+## Implementation (as built)
+
+```
+web/asset/
+  glb.ts          parseContainer(bytes) → { json: <parsed glTF>, bin: Uint8Array|null }
+                  · GLB header + chunk walk · plain .gltf + data-URI buffers · GlbError
+  gltf.ts         decodeContainer({json,bin}, opts) → Asset
+                  · accessor reader: FLOAT/packed/aligned → Float32Array VIEW (zero-copy);
+                    else copy + widen (u8/u16 indices → u32) / normalize / densify sparse
+                  · nodes: topological re-order (parents first), matrix→TRS decompose,
+                    parent index resolved
+                  · primitives: POSITION/NORMAL/TEXCOORD_0/COLOR_0, indices, AABB (accessor
+                    min/max or recomputed), material index
+                  · materials: pbrMetallicRoughness (baseColorFactor/Texture, metallic,
+                    roughness), emissive, alphaMode, doubleSided
+                  · textures/images: bytes kept raw (decode deferred)
+                  · everything unsupported → asset.ignored[] (never silent)
+  Asset.ts        the immutable data shapes (no renderer / WASM import)
+  AssetManager.ts load(url) → {asset, timing} · instantiate(asset, scene) → Entity[]
+                  (registers each primitive's geometry once; shared meshes reused;
+                  multi-primitive mesh → child entity per primitive) · loadInto(url, scene)
+web/api/Scene.ts  scene.loadAsset(url)  (lazy AssetManager)
+```
+
+The loader (`glb` + `gltf` + `Asset`) imports **nothing** from `web/renderer`,
+`web/bindings`, or the WASM core — it runs and is tested in plain Node.
+`AssetManager` is the only file that bridges to `Scene` / the renderer.
+
 ## Questions to answer first
+
+*(answered — see "Decisions" above and FINDINGS F-010)*
 
 1. **glTF subset.** Which of glTF 2.0 does the minimal pass need? (nodes, meshes,
    primitives with mode 4, accessors POSITION / NORMAL / TEXCOORD_0 / indices,
