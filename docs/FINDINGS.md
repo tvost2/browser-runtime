@@ -8,6 +8,115 @@ g++ 16.1 (MinGW-w64). Absolute numbers are ~3× a modern laptop; ratios hold.
 
 ---
 
+## F-012 · Incremental scene evaluation — a static 250k-entity frame costs 1.7 ms (was ~90 ms); + a spatial index for queries
+`npm run build && npm run test:equivalence && npm run test:spatial`
+`node --expose-gc bench/run-scene-incremental.mjs 250000`
+Cycle: [docs/investigations/scene-incremental.md](investigations/scene-incremental.md). Branch `feat/incremental-scene`.
+Improves the v0.1.0 `evaluate()` (F-008); v0.1.0 frozen benchmarks untouched.
+
+### The problem
+
+`World::evaluate()` recomputed **every** entity's world matrix + 8-corner
+bounding refit **every frame**, regardless of whether anything moved. F-008
+measured this as ~250–350 ns/entity → ~90 ms for a 250k-entity frame. But most
+entities in most scenes never move.
+
+### IMPLEMENT — dirty-tracked incremental transforms
+
+`evaluate()` splits into a **transform pass** and a **cull pass**. The transform
+pass recomputes `world[i]` + `worldMin/Max[i]` only for entities whose local
+transform changed (`dirty[i]`, set by the TS `Transform` setters) **or whose
+ancestor moved this frame** — the topological order propagates that in one
+forward sweep (`_recomputed[parent] → recompute child`). World AABBs are now
+persistent, not transient.
+
+Fast path: `recomputed == 0 && camera unchanged && no structural change` → the
+render list is reused verbatim, `stats.frameChanged = 0`, and the renderer skips
+the instance-matrix storage-buffer re-upload.
+
+`World::resize()` also fixed to grow storage **preserving** existing entity data
+(was `assign` — zeroed everything; latent corruption when a scene built one
+entity at a time crossed a capacity boundary, e.g. a GLB with >256 nodes).
+
+### VALIDATE — `npm run test:equivalence` **6/6** (was 4/4)
+
+`test_incremental.cpp`: a 5000-entity forest through random edits — only the
+moved subtree is recomputed (`transformsRecomputed` exact), every world matrix
+stays **bit-identical** to a `markAllDirty()` full recompute, the visible set
+matches, `frameChanged` is 0 iff nothing moved + camera unchanged, `resize()`
+preserves data. 200-iteration golden comparison against a shadow `World` that
+always does a full recompute. The existing Babylon-fixture equivalence
+(`test_world_equiv`, JS kernel, WASM core) still passes unchanged.
+
+### BENCHMARK — `evaluate()` ms, bench host, best-of-5 medians
+
+Shell scene, ~50 % on-screen (`dense`), by fraction of the scene moving per frame:
+
+| entities | static | 0.1 % | 1 % | 10 % | 100 % | JS kernel (full) | Babylon 50k |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| 10 000 | 0.06 | 0.5 | 0.6 | 1.0 | 2.5 | 10 | dflt 49 / froz 38 |
+| 50 000 | 0.30 | 3.1 | 3.2 | 5.7 | 14 | 58 | dflt 237 / froz 205 |
+| 250 000 | **1.7** | 11 | 13 | 35 | 90 | ~390 | — (build too heavy) |
+
+- **A fully static 250k frame: 1.7 ms** — was ~90 ms (F-008), a **~50×** drop;
+  **~230×** the JS data-oriented kernel; Babylon can't make a 50k static scene
+  cheaper than ~205 ms even with `freezeWorldMatrix()` + `freezeActiveMeshes()`
+  → our 0.3 ms at 50k static is **~680×**.
+- **100 % moving is unchanged** (90 ms @ 250k) — no regression on the worst case.
+- Between: cost tracks the moved fraction *plus* the O(n) cull pass, which still
+  visits every entity (the camera usually moves). At 0.1 % moving, 250k, only
+  ~4900 transforms recompute — the remaining ~11 ms is the linear cull + the
+  O(visible) render-list build.
+
+### IMPLEMENT — `bcpp::Bvh` spatial index (+ `CullStrategy::Bvh`, `raycast`, `queryBox`)
+
+A flat, refittable BVH over the world AABBs: binned-SAH build (iterative),
+`refitDirty()` that updates only moved leaves + ancestors (O(moved·depth) via an
+`entityLeaf`/`nodeParent` map), node-AABB frustum classify that prunes whole
+subtrees and marks fully-inside nodes to skip the per-entity test.
+`CullStrategy::Bvh` builds on setup, refits on light-motion frames, and on a
+heavy-churn frame (`recomputed·8 > count`) does a cheap full refit + culls
+linearly — so the worst case is bounded to ≈ Standard, never a per-frame SAH
+rebuild.
+
+### VALIDATE — `test_bvh.cpp` + `npm run test:spatial`
+
+The BVH visible set is **identical** to `Standard` across build / refit /
+camera-move / 100 random-motion frames; `queryBox` and `raycast` (nearest
+entity-AABB hit) match brute-force scans, in C++ and through the TS binding
+(incl. across a heap growth).
+
+### BENCHMARK — `CullStrategy::Bvh` vs `Standard`, 250k entities
+
+| | static | 0.1 % moving | 1 % moving | 10 % moving | 100 % moving |
+|---|--:|--:|--:|--:|--:|
+| Standard | 1.7 | 11–13 | 11–13 | 25–35 | 88–93 |
+| Bvh | 1.7 | **7–10** | 12 | 40–46 | 100 |
+
+- The BVH cull **only wins for a large scene with <~1 % moving per frame**
+  (~1.3–1.5×); it **ties** on static (Standard's fast-path already returns) and
+  is **mildly worse** above ~10 % moving (the full-refit tax on churn frames).
+- MEASURED conclusion: the cull strategy is **situational, not the default**.
+
+### DECIDE
+
+- **Ship incremental transforms** — unambiguous, no regression, bit-exact. This
+  is the win: mostly-static large scenes now cost almost nothing per frame,
+  which is the common case and something Babylon's freeze APIs cannot achieve.
+- **Ship the BVH for its queries.** `raycast()` / `queryBox()` are needed for
+  picking, triggers, spatial audio, and a future physics broadphase, and have no
+  substitute. `CullStrategy::Bvh` ships as a documented option for large, calm
+  scenes; `Standard` stays the default.
+- **HYPOTHESIS (next):** the O(n) cull pass and the O(visible) render-list build
+  now dominate the "some movement" frame. An **incremental render list** (patch
+  only changed instance matrices; keep the visible set when the frustum result
+  is stable) and **persistent per-node visibility** in the BVH are the next
+  levers. Occlusion culling and clustered lighting can reuse the same index.
+
+`develop` green; v0.1.0 untouched.
+
+---
+
 ## F-011 · Full C++/WASM GLB pipeline — the front-end is ~free in C++, geometry work is where B wins
 `npm run build && npm run build:wasm:nosimd`
 `npm run test:glb:native && npm run test:glb:render`

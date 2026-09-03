@@ -1,0 +1,614 @@
+{
+  "kind": "scene-incremental",
+  "ratios": [
+    0.001,
+    0.01,
+    0.1,
+    1
+  ],
+  "rows": [
+    {
+      "kind": "dense",
+      "n": 1000,
+      "visible": 73,
+      "standard": {
+        "1": {
+          "ms": 0.2248000000000161,
+          "recomputed": 1000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.09129999999998972,
+          "recomputed": 42,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.09500000000002728,
+          "recomputed": 57,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 0.08260000000001355,
+          "recomputed": 194,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.012200000000007094,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 0.2357000000000653,
+          "recomputed": 1000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.061800000000005184,
+          "recomputed": 42,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.06889999999998508,
+          "recomputed": 57,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 0.09530000000006567,
+          "recomputed": 194,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.012200000000007094,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": 1.761600000000044,
+      "babylon": {
+        "defaultMs": 3.624300000000403,
+        "frozenMs": 2.550699999999779
+      }
+    },
+    {
+      "kind": "dense",
+      "n": 10000,
+      "visible": 663,
+      "standard": {
+        "1": {
+          "ms": 2.424999999999727,
+          "recomputed": 10000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.526299999999992,
+          "recomputed": 140,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.5763999999999214,
+          "recomputed": 316,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 1.0313000000001011,
+          "recomputed": 2045,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.05940000000009604,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 2.78479999999945,
+          "recomputed": 10000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.43179999999938445,
+          "recomputed": 140,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.6031000000002678,
+          "recomputed": 316,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 1.3813000000000102,
+          "recomputed": 2045,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.06239999999979773,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": 9.208999999999833,
+      "babylon": {
+        "defaultMs": 45.9882000000016,
+        "frozenMs": 39.668900000000576
+      }
+    },
+    {
+      "kind": "dense",
+      "n": 50000,
+      "visible": 3236,
+      "standard": {
+        "1": {
+          "ms": 14.14350000000195,
+          "recomputed": 50000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 2.6765999999988708,
+          "recomputed": 253,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 3.370599999998376,
+          "recomputed": 1099,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 5.896300000000338,
+          "recomputed": 9298,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.29320000000006985,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 16.929599999999482,
+          "recomputed": 50000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 2.606599999999162,
+          "recomputed": 253,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 2.8523999999997613,
+          "recomputed": 1099,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 8.884699999998702,
+          "recomputed": 9298,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.2868000000016764,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": 60.66619999999966,
+      "babylon": {
+        "defaultMs": 249.39990000000398,
+        "frozenMs": 205.4930999999924
+      }
+    },
+    {
+      "kind": "dense",
+      "n": 100000,
+      "visible": 6456,
+      "standard": {
+        "1": {
+          "ms": 33.05939999999828,
+          "recomputed": 100000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 5.059899999992922,
+          "recomputed": 521,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 5.661099999997532,
+          "recomputed": 2218,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 13.057000000000698,
+          "recomputed": 18290,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.6273999999975786,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 37.366700000013225,
+          "recomputed": 100000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 3.515499999979511,
+          "recomputed": 521,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 6.790400000027148,
+          "recomputed": 2218,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 17.12619999999879,
+          "recomputed": 18290,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.6262999999744352,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": 131.06280000001425,
+      "babylon": {
+        "note": "skipped >60k (Babylon per-mesh build too heavy for this host)"
+      }
+    },
+    {
+      "kind": "dense",
+      "n": 250000,
+      "visible": 16158,
+      "standard": {
+        "1": {
+          "ms": 88.13360000000102,
+          "recomputed": 250000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 13.051600000006147,
+          "recomputed": 465,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 12.844800000020768,
+          "recomputed": 4901,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 33.53719999999157,
+          "recomputed": 45421,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 1.6981000000087079,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 101.48970000000554,
+          "recomputed": 250000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 9.95370000001276,
+          "recomputed": 465,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 18.301299999991897,
+          "recomputed": 4901,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 46.15030000000843,
+          "recomputed": 45421,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 1.6797999999835156,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": 395.9658000000054,
+      "babylon": {
+        "note": "skipped >60k (Babylon per-mesh build too heavy for this host)"
+      }
+    },
+    {
+      "kind": "sparse",
+      "n": 1000,
+      "visible": 0,
+      "standard": {
+        "1": {
+          "ms": 0.22899999999208376,
+          "recomputed": 1000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.04170000000158325,
+          "recomputed": 14,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.04290000000037253,
+          "recomputed": 25,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 0.07559999998193234,
+          "recomputed": 186,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.011400000017601997,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 0.22529999999096617,
+          "recomputed": 1000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.033100000000558794,
+          "recomputed": 14,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.04269999999087304,
+          "recomputed": 25,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 0.0866999999852851,
+          "recomputed": 186,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.011599999997997656,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": null,
+      "babylon": null
+    },
+    {
+      "kind": "sparse",
+      "n": 10000,
+      "visible": 0,
+      "standard": {
+        "1": {
+          "ms": 2.4054999999934807,
+          "recomputed": 10000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.3506000000052154,
+          "recomputed": 166,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.4140999999945052,
+          "recomputed": 325,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 0.803699999989476,
+          "recomputed": 1862,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.04109999997308478,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 2.8347000000067055,
+          "recomputed": 10000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 0.2629999999771826,
+          "recomputed": 166,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 0.4274999999906868,
+          "recomputed": 325,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 1.1774000000150409,
+          "recomputed": 1862,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.03879999998025596,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": null,
+      "babylon": null
+    },
+    {
+      "kind": "sparse",
+      "n": 50000,
+      "visible": 0,
+      "standard": {
+        "1": {
+          "ms": 11.846199999999953,
+          "recomputed": 50000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 1.9389999999839347,
+          "recomputed": 595,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 2.6321999999927357,
+          "recomputed": 1481,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 4.023300000000745,
+          "recomputed": 9675,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.2878999999957159,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 14.322799999994459,
+          "recomputed": 50000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 1.7425999999977648,
+          "recomputed": 595,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 2.1097000000008848,
+          "recomputed": 1481,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 5.77369999999064,
+          "recomputed": 9675,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.30340000000433065,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": null,
+      "babylon": null
+    },
+    {
+      "kind": "sparse",
+      "n": 100000,
+      "visible": 3,
+      "standard": {
+        "1": {
+          "ms": 28.850199999986216,
+          "recomputed": 100000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 4.710000000020955,
+          "recomputed": 552,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 4.247099999978673,
+          "recomputed": 2354,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 7.992700000002515,
+          "recomputed": 18290,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.6347999999998137,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 32.41950000001816,
+          "recomputed": 100000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 3.267699999996694,
+          "recomputed": 552,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 5.499500000005355,
+          "recomputed": 2354,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 13.015299999999115,
+          "recomputed": 18290,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 0.6150999999954365,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": null,
+      "babylon": null
+    },
+    {
+      "kind": "sparse",
+      "n": 250000,
+      "visible": 2,
+      "standard": {
+        "1": {
+          "ms": 82.79229999997187,
+          "recomputed": 250000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 11.071999999985565,
+          "recomputed": 575,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 10.9087999999756,
+          "recomputed": 5174,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 25.446300000010524,
+          "recomputed": 45770,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 1.6949000000022352,
+          "recomputed": 0
+        }
+      },
+      "bvh": {
+        "1": {
+          "ms": 95.80290000000969,
+          "recomputed": 250000,
+          "bvhBuilds": 0
+        },
+        "0.001": {
+          "ms": 7.119799999985844,
+          "recomputed": 575,
+          "bvhBuilds": 0
+        },
+        "0.01": {
+          "ms": 11.73579999996582,
+          "recomputed": 5174,
+          "bvhBuilds": 0
+        },
+        "0.1": {
+          "ms": 46.44949999998789,
+          "recomputed": 45770,
+          "bvhBuilds": 0
+        },
+        "static": {
+          "ms": 1.664199999999255,
+          "recomputed": 0
+        }
+      },
+      "jsFullMs": null,
+      "babylon": null
+    }
+  ]
+}
