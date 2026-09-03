@@ -205,7 +205,8 @@ async function loadBabylon(url) {
   bb.scene = new BJS.Scene(bb.engine);
   bb.scene.clearColor = new BJS.Color4(0.04, 0.05, 0.07, 1);
   const cam = new BJS.ArcRotateCamera("c", 1.0, 1.1, 10, BJS.Vector3.Zero(), bb.scene);
-  cam.attachControl(cR, true);
+  // the shared orbit handler (on .grid) drives both cameras — Babylon's own
+  // input would fight it for alpha/beta on the right pane, so leave it off.
   new BJS.HemisphericLight("h", new BJS.Vector3(0.4, 1, 0.3), bb.scene).intensity = 0.9;
   const dl = new BJS.DirectionalLight("d", new BJS.Vector3(-0.5, -0.9, -0.4), bb.scene); dl.intensity = 0.6;
 
@@ -238,12 +239,59 @@ async function loadBabylon(url) {
   bb.ready = true;
 }
 
+// ---------- orbit camera (shared by both panes) ----------
+// az = azimuth, el = polar angle from +Y, zoom = radius as a multiple of
+// the model's half-extent. Drag rotates, wheel/pinch zooms; auto-spin
+// just keeps adding to az when nothing is being dragged.
+const orbit = { az: 0, el: 1.15, zoom: 2.6 };
+const clampEl = (v) => Math.max(0.08, Math.min(Math.PI - 0.08, v));
+const clampZoom = (v) => Math.max(1.15, Math.min(14, v));
+let dragging = false;
+{
+  const grid = document.querySelector(".grid");
+  const pts = new Map(); // pointerId -> {x,y}
+  let pinchDist = 0;
+  const onDown = (e) => {
+    grid.setPointerCapture?.(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragging = true;
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinchDist = Math.hypot(a.x - b.x, a.y - b.y); }
+  };
+  const onMove = (e) => {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    if (pts.size === 2) {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const [a, b] = [...pts.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist) orbit.zoom = clampZoom(orbit.zoom * (pinchDist / d));
+      pinchDist = d;
+      return;
+    }
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    orbit.az -= dx * 0.01;
+    orbit.el = clampEl(orbit.el - dy * 0.01);
+  };
+  const onUp = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinchDist = 0;
+    if (pts.size === 0) dragging = false;
+  };
+  grid.addEventListener("pointerdown", onDown);
+  grid.addEventListener("pointermove", onMove);
+  grid.addEventListener("pointerup", onUp);
+  grid.addEventListener("pointercancel", onUp);
+  grid.addEventListener("wheel", (e) => { e.preventDefault(); orbit.zoom = clampZoom(orbit.zoom * (1 + Math.sign(e.deltaY) * 0.12)); }, { passive: false });
+  grid.style.touchAction = "none";
+  grid.style.cursor = "grab";
+}
+
 // ---------- load + render loop ----------
-let camAngle = 0;
 async function loadBoth(name) {
   const url = "/models/" + encodeURIComponent(name);
   errBox.style.display = "none";
-  camAngle = 0;
+  orbit.az = 0; orbit.el = 1.15; orbit.zoom = 2.6;
   await Promise.allSettled([
     loadRuntime(url).catch((e) => { console.error(e); showErr("runtime: " + (e.message || e)); $("sL").textContent = "error: " + (e.message || e); }),
     NO_BABYLON ? null : loadBabylon(url).catch((e) => { console.error(e); showErr("babylon: " + (e.message || e)); $("sR").textContent = "error: " + (e.stack || e.message || e); }),
@@ -252,21 +300,19 @@ async function loadBoth(name) {
 
 let accL = 0, accR = 0, nn = 0;
 function tick(ts) {
-  const spin = $("spin").checked;
-  if (spin) camAngle += 0.005;
+  if ($("spin").checked && !dragging) orbit.az += 0.005;
 
-  // both cameras: identical spherical pose around the model centre
-  //   radius = 2.6·r · polar (beta) 1.15 rad from +Y · same azimuth
-  const R = 2.6, BETA = 1.15;
-  const sb = Math.sin(BETA), cb = Math.cos(BETA);
+  // both cameras: identical spherical pose around the model centre,
+  // driven by the shared `orbit` state (drag / wheel / pinch / spin)
+  const sb = Math.sin(orbit.el), cb = Math.cos(orbit.el);
   // --- runtime --- (one bad frame must not kill the rAF loop)
   if (rt.ready && rt.engine && rt.scene && rt.center) {
     try {
-      const d = rt.radius * R;
+      const d = rt.radius * orbit.zoom;
       rt.scene.camera.position = [
-        rt.center[0] + d * sb * Math.cos(camAngle),
+        rt.center[0] + d * sb * Math.cos(orbit.az),
         rt.center[1] + d * cb,
-        rt.center[2] + d * sb * Math.sin(camAngle),
+        rt.center[2] + d * sb * Math.sin(orbit.az),
       ];
       const st = rt.engine.renderOnce();
       accL += st.cpuFrameMs;
@@ -276,7 +322,7 @@ function tick(ts) {
   if (bb.ready && bb.engine && bb.scene && bb.radius) {
     try {
       const cam = bb.scene.activeCamera;
-      if (cam) { cam.alpha = camAngle + Math.PI; cam.beta = BETA; cam.radius = bb.radius * R; }
+      if (cam) { cam.alpha = orbit.az + Math.PI; cam.beta = orbit.el; cam.radius = bb.radius * orbit.zoom; }
       const t = performance.now();
       bb.scene.render();
       accR += performance.now() - t;
