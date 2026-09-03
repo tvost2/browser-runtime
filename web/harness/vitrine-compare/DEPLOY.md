@@ -9,6 +9,17 @@ Fully static. No node process on the VM.
 - Cert: Let's Encrypt via Cloudflare DNS-01.
 
 Re-deploy = re-run the build + re-upload (steps 1-2). DNS/Caddy already done.
+Atomic swap (no half-served state, keeps a rollback):
+
+```
+cd web/harness/vitrine-compare/dist
+D=/opt/sitefactory/deploy
+tar czf - . | ssh mytheria@192.168.100.127 "rm -rf $D/3dviewer.new && mkdir -p $D/3dviewer.new \
+  && tar xzf - -C $D/3dviewer.new \
+  && rm -rf $D/3dviewer.old \
+  && mv $D/3dviewer $D/3dviewer.old && mv $D/3dviewer.new $D/3dviewer"
+```
+Rollback: `mv 3dviewer 3dviewer.bad && mv 3dviewer.old 3dviewer` in `/opt/sitefactory/deploy/`.
 
 ## 1. Build the bundle (on this machine)
 
