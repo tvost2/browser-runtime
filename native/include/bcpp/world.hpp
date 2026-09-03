@@ -156,6 +156,37 @@ public:
         const double t0 = _now_us();
         _recomputed.assign(count, 0);
         uint32_t recomputed = 0;
+
+        // GPU-driven path: the compute shader does transform + refit + cull +
+        // compaction + draw-args. The CPU only records which local transforms
+        // changed (so the renderer re-uploads just those TRS rows) and keeps the
+        // per-mesh bucket layout current. No world matrices are computed here —
+        // raycast()/queryBox()/worldBounds() need a non-GPU evaluate() to be
+        // current.
+        if (strat == CullStrategy::Gpu) {
+            uint32_t changed = 0;
+            for (uint32_t i = 0; i < count; ++i) {
+                const uint8_t d = (uint8_t)(structChanged || dirty[i]);
+                _recomputed[i] = d;
+                changed += d;
+            }
+            std::fill(dirty.begin(), dirty.begin() + std::min<size_t>(count, dirty.size()), 0);
+            _hierarchyDirty = false;
+            _prevCount = count;
+            stats.transformsRecomputed = changed;
+            stats.transformUs = (float)(_now_us() - t0);
+
+            _gpuLayoutRebuilt = (structChanged || _meshLayoutDirty || _gpuBuckets.empty()) ? 1u : 0u;
+            if (_gpuLayoutRebuilt) buildGpuBuckets();
+            _meshLayoutDirty = false;
+            _lastStrat = strat;
+            stats.visible = 0;
+            stats.batches = (uint32_t)_gpuBucketMesh.size();
+            stats.frameChanged = (changed || camMoved || structChanged) ? 1u : 0u;
+            stats.cullUs = 0; stats.listUs = 0;
+            return;
+        }
+
         for (uint32_t k = 0; k < count; ++k) {
             const uint32_t i = _order[k];
             const int32_t p = parent[i];
@@ -187,23 +218,6 @@ public:
         _prevCount = count;
         const double t1 = _now_us();
         stats.transformUs = (float)(t1 - t0);
-
-        // --- GPU-driven path: CPU is done after the transform pass. The compute
-        //     shader reads worldSphere[] + entityBucket[] and does frustum cull,
-        //     per-mesh atomic compaction and indirect-draw-args generation. We
-        //     only keep the bucket layout current (recomputed when meshId /
-        //     visibility flags change, not per frame). ---
-        if (strat == CullStrategy::Gpu) {
-            _gpuLayoutRebuilt = (structChanged || _meshLayoutDirty || _gpuBuckets.empty()) ? 1u : 0u;
-            if (_gpuLayoutRebuilt) buildGpuBuckets();
-            _meshLayoutDirty = false;
-            _lastStrat = strat;
-            stats.visible = 0;               // the GPU knows; CPU does not
-            stats.batches = (uint32_t)_gpuBucketMesh.size();
-            stats.frameChanged = (recomputed || camMoved || structChanged) ? 1u : 0u;
-            stats.cullUs = 0; stats.listUs = 0;
-            return;
-        }
 
         // Auto → concrete strategy for the rest of this frame: a BVH traversal
         // beats the O(n) linear re-test while the camera moves over a large

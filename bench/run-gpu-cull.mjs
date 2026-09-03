@@ -31,8 +31,8 @@ const browser = await chromium.launch({
 });
 
 const STRAT = { Standard: 0, Gpu: 5 };
-const COUNTS = [50000, 150000];
-const SCEN = ["static", "camera"];
+const COUNTS = [150000];
+const SCEN = ["static", "camera", "transform"]; // transform = 1% of entities move each frame
 
 // --- equivalence: GPU visible set vs CPU Standard on the same frame ---
 {
@@ -67,7 +67,8 @@ for (const count of COUNTS) {
       const errs = [];
       page.on("pageerror", (e) => errs.push(String(e).split("\n")[0]));
       page.on("console", (m) => { if (/webgpu:|error/i.test(m.text())) errs.push(m.text().slice(0, 140)); });
-      await page.goto(`http://localhost:${port}/web/harness/cull-bench.html?count=${count}&strategy=${s}&scenario=${scenario}`);
+      const mv = scenario === "transform" ? "&moverRatio=0.01" : "";
+      await page.goto(`http://localhost:${port}/web/harness/cull-bench.html?count=${count}&strategy=${s}&scenario=${scenario}${mv}`);
       await page.waitForFunction(() => window.__ready, { timeout: 30000 });
       await page.evaluate(() => window.__bench.reset());
       await page.waitForTimeout(4000);
@@ -88,12 +89,11 @@ for (const r of results) {
   );
 }
 
-// headline: camera scenario, big count
 const pairs = {};
 for (const r of results) (pairs[`${r.count}/${r.scenario}`] ??= {})[r.strat] = r;
-console.log("\n  camera-orbit, per-frame CPU→GPU upload:");
+console.log("\n  Standard → Gpu (transform + cull on the GPU):");
 for (const k of Object.keys(pairs)) {
   const { Standard: a, Gpu: b } = pairs[k];
-  if (!a || !b || a.scenario !== "camera") continue;
-  console.log(`    ${k}:  Standard ${(a.uploadBytesMed / 1024).toFixed(0)} KB/frame  →  Gpu ${(b.uploadBytesMed / 1024).toFixed(1)} KB/frame   (cpu ${a.cpuFrameMs.toFixed(2)} → ${b.cpuFrameMs.toFixed(2)} ms)`);
+  if (!a || !b) continue;
+  console.log(`    ${k.padEnd(18)}  cpu ${a.cpuFrameMs.toFixed(2)} → ${b.cpuFrameMs.toFixed(2)} ms   ·   upload ${(a.uploadBytesMed / 1024).toFixed(0)} → ${(b.uploadBytesMed / 1024).toFixed(1)} KB/frame`);
 }

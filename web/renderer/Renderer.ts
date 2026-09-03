@@ -108,6 +108,71 @@ fn args(@builtin(global_invocation_id) gid : vec3<u32>) {
   drawArgs[o + 4u] = 0u;                           // firstInstance — bucket base is a dynamic uniform instead
 }`;
 
+// transform pass — one compute dispatch recomputes every entity's world matrix
+// (compose local TRS, pointer-chase up the parent chain) + world bounding
+// sphere. The CPU uploads local TRS only when it changes; the GPU is the sole
+// owner of world matrices in this mode.
+const XFORM_WGSL = /* wgsl */ `
+struct XU { count : u32, maxDepth : u32, _a : u32, _b : u32 };
+@group(0) @binding(0) var<uniform> u : XU;
+@group(0) @binding(1) var<storage, read>       lpos   : array<f32>;        // 3 per entity
+@group(0) @binding(2) var<storage, read>       lrot   : array<vec4<f32>>;  // quat x,y,z,w
+@group(0) @binding(3) var<storage, read>       lscl   : array<f32>;        // 3
+@group(0) @binding(4) var<storage, read>       parent : array<i32>;
+@group(0) @binding(5) var<storage, read>       lmin   : array<f32>;        // 3
+@group(0) @binding(6) var<storage, read>       lmax   : array<f32>;        // 3
+@group(0) @binding(7) var<storage, read_write> wmat   : array<mat4x4<f32>>;
+@group(0) @binding(8) var<storage, read_write> wsph   : array<vec4<f32>>;
+
+// row-major (C++) matrix stored as WGSL columns → M*v in WGSL == p_row·M in C++
+fn composeLocal(i : u32) -> mat4x4<f32> {
+  let sx = lscl[i*3u]; let sy = lscl[i*3u+1u]; let sz = lscl[i*3u+2u];
+  var q = lrot[i];
+  q = q / max(length(q), 1e-8);
+  let x = q.x; let y = q.y; let z = q.z; let w = q.w;
+  let x2 = x+x; let y2 = y+y; let z2 = z+z;
+  let xx = x*x2; let xy = x*y2; let xz = x*z2;
+  let yy = y*y2; let yz = y*z2; let zz = z*z2;
+  let wx = w*x2; let wy = w*y2; let wz = w*z2;
+  return mat4x4<f32>(
+    vec4<f32>((1.0-(yy+zz))*sx, (xy+wz)*sx,     (xz-wy)*sx,     0.0),  // C++ row 0
+    vec4<f32>((xy-wz)*sy,     (1.0-(xx+zz))*sy, (yz+wx)*sy,     0.0),  // row 1
+    vec4<f32>((xz+wy)*sz,     (yz-wx)*sz,     (1.0-(xx+yy))*sz, 0.0),  // row 2
+    vec4<f32>(lpos[i*3u], lpos[i*3u+1u], lpos[i*3u+2u], 1.0),         // row 3 (translation)
+  );
+}
+
+@compute @workgroup_size(64)
+fn xform(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let i = gid.x;
+  if (i >= u.count) { return; }
+  var m = composeLocal(i);
+  var p = parent[i];
+  var guard = 0u;
+  loop {
+    if (p < 0 || guard >= u.maxDepth) { break; }
+    m = composeLocal(u32(p)) * m;   // ancestor on the left (WGSL)  ==  local·parentWorld (C++)
+    p = parent[u32(p)];
+    guard = guard + 1u;
+  }
+  wmat[i] = m;
+
+  var lo = vec3<f32>(lmin[i*3u], lmin[i*3u+1u], lmin[i*3u+2u]);
+  var hi = vec3<f32>(lmax[i*3u], lmax[i*3u+1u], lmax[i*3u+2u]);
+  var wmin = vec3<f32>(1e30, 1e30, 1e30);
+  var wmax = vec3<f32>(-1e30, -1e30, -1e30);
+  for (var c = 0u; c < 8u; c = c + 1u) {
+    let cx = select(lo.x, hi.x, (c & 1u) != 0u);
+    let cy = select(lo.y, hi.y, (c & 2u) != 0u);
+    let cz = select(lo.z, hi.z, (c & 4u) != 0u);
+    let wp = (m * vec4<f32>(cx, cy, cz, 1.0)).xyz;
+    wmin = min(wmin, wp);
+    wmax = max(wmax, wp);
+  }
+  let ctr = (wmin + wmax) * 0.5;
+  wsph[i] = vec4<f32>(ctr, length((wmax - wmin) * 0.5));
+}`;
+
 // render pipeline for GPU mode: world matrices are entity-indexed, the instance
 // index goes through visibleIds first.
 const GPU_WGSL = /* wgsl */ `
@@ -155,14 +220,20 @@ struct VSOut { @builtin(position) clip : vec4<f32>, @location(0) n : vec3<f32>, 
 export interface GpuFrame {
   count: number;
   numBuckets: number;
+  maxDepth: number;           // parent-chain cap for the transform pointer-chase
   bucketMesh: Uint32Array;    // meshId per bucket (draw order)
   bucketOffset: Uint32Array;  // numBuckets + 1
   entityBucket: Uint32Array;  // count
-  worldMats: Float32Array;    // count * 16
-  worldSphere: Float32Array;  // count * 4
   flags: Uint32Array;         // count
-  recomputed: Uint8Array;     // count — matrices that changed this frame
-  layoutChanged: boolean;
+  recomputed: Uint8Array;     // count — local transforms that changed this frame
+  // local transform inputs — the GPU composes world matrices from these
+  localPos: Float32Array;     // count * 3
+  localRot: Float32Array;     // count * 4
+  localScale: Float32Array;   // count * 3
+  parent: Int32Array;         // count
+  localMin: Float32Array;     // count * 3
+  localMax: Float32Array;     // count * 3
+  layoutChanged: boolean;     // bucket layout / structure changed → re-upload static buffers
   frameChanged: boolean;
 }
 
@@ -231,13 +302,21 @@ export class Renderer {
   private qRead?: GPUBuffer;
 
   // --- GPU-driven cull path ---
+  private computeXform?: GPUComputePipeline;
+  private xformLayout?: GPUBindGroupLayout;
+  private xformBind?: GPUBindGroup;
+  private gLPos?: GPUBuffer; private gLRot?: GPUBuffer; private gLScl?: GPUBuffer;
+  private gParent?: GPUBuffer; private gLMin?: GPUBuffer; private gLMax?: GPUBuffer;
+  private gXformU?: GPUBuffer;
+  private gStructValid = false;   // parent + local AABB uploaded for the current structure
+  private gLocalValid = false;    // local TRS fully uploaded once
   private computeCull?: GPUComputePipeline;
   private computeArgs?: GPUComputePipeline;
   private cullLayout?: GPUBindGroupLayout;
   private pipelineGpu?: GPURenderPipeline;
   private pipelineGpuNoCull?: GPURenderPipeline;
   private g0GpuLayout?: GPUBindGroupLayout;
-  private gWorldMat?: GPUBuffer;   private gWorldMatCap = 0;
+  private gWorldMat?: GPUBuffer;
   private gSphere?: GPUBuffer;
   private gEntBucket?: GPUBuffer;
   private gBucketOff?: GPUBuffer;
@@ -254,7 +333,6 @@ export class Renderer {
   private gEntCap = 0;
   private gBucketCap = 0;
   private gBucketMesh = new Uint32Array(0);
-  private gWorldMatValid = false;
   private _plane = new Float32Array(24);
 
   drawCalls = 0;
@@ -352,6 +430,27 @@ export class Renderer {
     this.computeArgs = d.createComputePipeline({ layout: clayout, compute: { module: cmod, entryPoint: "args" } });
     this.gCullU = d.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
+    // transform pass — composes world matrices from local TRS on the GPU
+    this.xformLayout = d.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: bufRO },
+        { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: bufRW },
+        { binding: 8, visibility: GPUShaderStage.COMPUTE, buffer: bufRW },
+      ],
+    });
+    const xmod = d.createShaderModule({ code: XFORM_WGSL });
+    this.computeXform = d.createComputePipeline({
+      layout: d.createPipelineLayout({ bindGroupLayouts: [this.xformLayout] }),
+      compute: { module: xmod, entryPoint: "xform" },
+    });
+    this.gXformU = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
     // GPU-mode render pipeline: g0 = camera + worldMats + visibleIds
     this.g0GpuLayout = d.createBindGroupLayout({
       entries: [
@@ -390,7 +489,8 @@ export class Renderer {
 
   dispose() {
     for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead,
-      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gCullU, this._bucketCntRead]) b?.destroy();
+      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gCullU,
+      this.gLPos, this.gLRot, this.gLScl, this.gParent, this.gLMin, this.gLMax, this.gXformU, this._bucketCntRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
     this.device.destroy();
@@ -641,15 +741,22 @@ export class Renderer {
 
     if (gpu.count > this.gEntCap) {
       const cap = Math.max(gpu.count, this.gEntCap * 2, 4096);
-      for (const b of [this.gWorldMat, this.gSphere, this.gEntBucket, this.gFlags, this.gVisible]) b?.destroy();
+      for (const b of [this.gWorldMat, this.gSphere, this.gEntBucket, this.gFlags, this.gVisible,
+        this.gLPos, this.gLRot, this.gLScl, this.gParent, this.gLMin, this.gLMax]) b?.destroy();
       this.gWorldMat = d.createBuffer({ size: cap * 64, usage: S | C | R });
       this.gSphere = d.createBuffer({ size: cap * 16, usage: S | C });
       this.gEntBucket = d.createBuffer({ size: cap * 4, usage: S | C });
       this.gFlags = d.createBuffer({ size: cap * 4, usage: S | C });
       this.gVisible = d.createBuffer({ size: cap * 4, usage: S | R });
+      this.gLPos = d.createBuffer({ size: cap * 12, usage: S | C });
+      this.gLRot = d.createBuffer({ size: cap * 16, usage: S | C });
+      this.gLScl = d.createBuffer({ size: cap * 12, usage: S | C });
+      this.gParent = d.createBuffer({ size: cap * 4, usage: S | C });
+      this.gLMin = d.createBuffer({ size: cap * 12, usage: S | C });
+      this.gLMax = d.createBuffer({ size: cap * 12, usage: S | C });
       this.gEntCap = cap;
-      this.gWorldMatCap = cap;
-      this.gWorldMatValid = false;
+      this.gStructValid = false;
+      this.gLocalValid = false;
       this._gpuArgsValid = false;
       rebind = true;
     }
@@ -693,7 +800,30 @@ export class Renderer {
       this._gpuArgsValid = false; // args must recompute with the new mesh info
     }
 
+    // transform inputs: parent + local AABB are static per structure; local TRS
+    // is patched per frame for the rows that moved.
+    if (gpu.layoutChanged || rebind || !this.gStructValid) {
+      d.queue.writeBuffer(this.gParent!, 0, gpu.parent.slice());
+      d.queue.writeBuffer(this.gLMin!, 0, gpu.localMin.slice());
+      d.queue.writeBuffer(this.gLMax!, 0, gpu.localMax.slice());
+      this.gStructValid = true;
+    }
+
     if (layoutUp) {
+      this.xformBind = d.createBindGroup({
+        layout: this.xformLayout!,
+        entries: [
+          { binding: 0, resource: { buffer: this.gXformU! } },
+          { binding: 1, resource: { buffer: this.gLPos! } },
+          { binding: 2, resource: { buffer: this.gLRot! } },
+          { binding: 3, resource: { buffer: this.gLScl! } },
+          { binding: 4, resource: { buffer: this.gParent! } },
+          { binding: 5, resource: { buffer: this.gLMin! } },
+          { binding: 6, resource: { buffer: this.gLMax! } },
+          { binding: 7, resource: { buffer: this.gWorldMat! } },
+          { binding: 8, resource: { buffer: this.gSphere! } },
+        ],
+      });
       this.gCullBind = d.createBindGroup({
         layout: this.cullLayout!,
         entries: [
@@ -760,32 +890,48 @@ export class Renderer {
     const recull = gpu.frameChanged || gpu.layoutChanged || !this._gpuArgsValid;
     const enc = d.createCommandEncoder();
 
-    if (recull) {
+    // local TRS upload: full once, then only the rows whose local transform
+    // changed this frame (0 for a still scene / camera-only motion).
+    const lp = gpu.localPos, lr = gpu.localRot, ls = gpu.localScale, rc = gpu.recomputed;
+    let xformDirty = !this.gLocalValid;
+    if (!this.gLocalValid) {
+      d.queue.writeBuffer(this.gLPos!, 0, lp.slice());
+      d.queue.writeBuffer(this.gLRot!, 0, lr.slice());
+      d.queue.writeBuffer(this.gLScl!, 0, ls.slice());
+      this.lastGpuUploadBytes = gpu.count * 40;
+      this.gLocalValid = true;
+    } else if (gpu.frameChanged) {
+      let k = 0;
+      while (k < gpu.count) {
+        if (!rc[k]) { k++; continue; }
+        let j = k + 1;
+        while (j < gpu.count && rc[j]) j++;
+        d.queue.writeBuffer(this.gLPos!, k * 12, lp.buffer, lp.byteOffset + k * 12, (j - k) * 12);
+        d.queue.writeBuffer(this.gLRot!, k * 16, lr.buffer, lr.byteOffset + k * 16, (j - k) * 16);
+        d.queue.writeBuffer(this.gLScl!, k * 12, ls.buffer, ls.byteOffset + k * 12, (j - k) * 12);
+        this.lastGpuUploadBytes += (j - k) * 40;
+        xformDirty = true;
+        k = j;
+      }
+    }
+
+    if (recull || xformDirty) {
       d.queue.writeBuffer(this.camBuf, 0, viewProj);
       const head = new Uint32Array(4); head[0] = gpu.count; head[1] = gpu.numBuckets;
       d.queue.writeBuffer(this.gCullU!, 0, head);
       this.writePlanes(viewProj);
       d.queue.writeBuffer(this.gCullU!, 16, this._plane);
+      d.queue.writeBuffer(this.gXformU!, 0, new Uint32Array([gpu.count, gpu.maxDepth, 0, 0]));
 
-      const wm = gpu.worldMats, sp = gpu.worldSphere, rc = gpu.recomputed;
-      if (!this.gWorldMatValid) {
-        d.queue.writeBuffer(this.gWorldMat!, 0, wm, 0, gpu.count * 16);
-        d.queue.writeBuffer(this.gSphere!, 0, sp, 0, gpu.count * 4);
-        this.lastGpuUploadBytes = gpu.count * 80;
-        this.gWorldMatValid = true;
-      } else if (gpu.frameChanged) {
-        let k = 0;
-        while (k < gpu.count) {
-          if (!rc[k]) { k++; continue; }
-          let j = k + 1;
-          while (j < gpu.count && rc[j]) j++;
-          d.queue.writeBuffer(this.gWorldMat!, k * 64, wm, k * 16, (j - k) * 16);
-          d.queue.writeBuffer(this.gSphere!, k * 16, sp, k * 4, (j - k) * 4);
-          this.lastGpuUploadBytes += (j - k) * 80;
-          k = j;
-        }
-      }
+      // pass 1: transform (writes gWorldMat + gSphere) — separate pass so the
+      // cull pass sees the results (no auto-barrier within a compute pass).
+      const xp = enc.beginComputePass();
+      xp.setBindGroup(0, this.xformBind!);
+      xp.setPipeline(this.computeXform!);
+      xp.dispatchWorkgroups(Math.ceil(gpu.count / 64));
+      xp.end();
 
+      // pass 2: cull + compact + draw args
       enc.clearBuffer(this.gBucketCnt!, 0, this.gBucketCap * 4);
       const cp = enc.beginComputePass();
       cp.setBindGroup(0, this.gCullBind!);
