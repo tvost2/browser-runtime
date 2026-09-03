@@ -117,6 +117,29 @@ image-decode noise. (Same lesson as F-008: a CPU-side win is not an FPS win.)
 | one `GltfPipeline` per module instance (no per-call alloc) | steady decode #1 0.3 ms → #5 0.1 ms |
 | BIN image bytes returned as zero-copy views (not sliced out of WASM) | DamagedHelmet native 4.6 → **2.0 ms** |
 
+### A vs B — per aspect (bench host; "winner" = on this axis, for real content)
+
+| aspect | PIPELINE A (JS front-end) | PIPELINE B (native) | winner |
+|---|---|---|---|
+| GLB container parse | ~0 (DataView walk) | ~0 (pointer walk, no copy) | tie |
+| JSON parse | 0.02–0.06 ms (`JSON.parse`) | 0.02–0.06 ms (yyjson) | tie |
+| glTF metadata build | in JS, ~0.05–0.3 ms, grows with node/mesh count | in C++, 0.03–0.07 ms, flat | **B** |
+| accessor decode (packed F32, GPU-ready) | zero-copy typed-array view | copy into linear memory | **A** |
+| accessor decode (needs convert / widen / de-interleave) | per-element JS loop | `bcpp::gltf::Batch` (memcpy fast paths, SIMD) | **B** |
+| normal / tangent generation | not implemented in JS | `bcpp::gltf::Batch` | **B** (only path) |
+| AABB | accessor min/max or JS scan | accessor min/max or C++ scan | tie |
+| JS↔WASM crossings | 0 (js) / 9 (auto) | **5**, flat | **B** vs auto |
+| bytes copied into WASM | referenced geometry ranges (auto) | whole blob once (parse) | **A** (texture-heavy) / tie (geometry-heavy) |
+| allocations (steady state) | 0 wasm-heap; JS GC pressure from views/slices | 0 wasm-heap (reused `Pipeline`) | **B** |
+| CPU throughput — tiny asset | 0.08 ms | 0.12 ms (fixed overhead) | **A** (moot) |
+| CPU throughput — geometry-heavy real asset | 144–168 ms (auto) | **122–135 ms** | **B** (+18–30 %) |
+| CPU throughput — texture-heavy GPU-ready | **1.3 ms** (js, zero-copy) | 2.0 ms (blob copy) | **A** |
+| GPU upload / first frame / steady frame | identical — same `Batch` output, same renderer | identical | tie (invisible) |
+| startup (module instantiate) | shared ~40–115 ms one-off | same module | tie |
+| warm load | ~0.1 ms overhead settled | ~0.1 ms overhead settled | tie |
+| integration with the runtime | JS orchestration, familiar | one C++ path, reusable as a standalone glTF core | **B** (qualitative) |
+| predictable memory / data-oriented | JS heap + views | flat POD `Document`, arena-like vectors | **B** (qualitative) |
+
 ### DECIDE — result **C / D** (the benchmark's answer, not a prior assumption)
 
 **The full C++/WASM pipeline is a complete, validated alternative — 114/114 data
