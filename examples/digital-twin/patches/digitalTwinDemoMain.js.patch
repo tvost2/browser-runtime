@@ -1,0 +1,103 @@
+--- .bak-browser-runtime/digitalTwinDemoMain.js	2026-09-03 16:33:17.680654606 +0000
++++ src/digitalTwin/digitalTwinDemoMain.js	2026-09-03 16:52:02.205010935 +0000
+@@ -16,6 +16,7 @@
+ 
+ import { DigitalTwinScene } from './DigitalTwinScene.js';
+ import { renderDigitalTwinObject, disposeDigitalTwinVisual } from './UniversalRendererAdapter.js';
++import * as RTR from './RuntimeRendererAdapter.js';
+ import { GeometryKind } from './GeometryPrimitives.js';
+ import { extrudePolygonToMesh, polylineToRibbonMesh, triangulatePolygon } from './geometryUtils.js';
+ import { applySparseGeometryToMesh } from '../primezeta/renderers/BabylonSparseFieldAdapter.js';
+@@ -2609,8 +2610,92 @@
+ // has loaded).
+ let lastSmartCityWindowCheckAt = 0;
+ const SMART_CITY_WINDOW_CHECK_INTERVAL_MS = 300;
++
++// ---- Engine toggle: Babylon (WebGL) ⇄ Browser Runtime (C++/WASM + WebGPU) ----
++// The Babylon scene keeps being built exactly as before (it drives
++// picking, labels, the far-tier merge, GPS). While RT_MODE is on we
++// skip scene3d.render(), mirror the Babylon meshes into the runtime
++// scene (diffed), and render that instead — same camera, same data.
++let RT_MODE = false;
++let _rtBooting = false;
++let _lastMirrorAt = 0;
++const RT_MIRROR_INTERVAL_MS = 250;
++const _engineStatusEl = el('engineStatus');
++const _runtimeHudEl = el('runtimeHud');
++const _runtimeCanvasEl = el('runtimeCanvas');
++
++async function setEngineMode(runtime) {
++  if (runtime) { // canvas must be laid out (non-zero size) BEFORE RtEngine.create configures the WebGPU context
++    _runtimeCanvasEl.style.display = 'block';
++    _runtimeCanvasEl.width = _runtimeCanvasEl.clientWidth * Math.min(devicePixelRatio || 1, 2);
++    _runtimeCanvasEl.height = _runtimeCanvasEl.clientHeight * Math.min(devicePixelRatio || 1, 2);
++  }
++  if (runtime && !RTR.isRuntimeReady()) {
++    if (_rtBooting) return;
++    _rtBooting = true;
++    if (_engineStatusEl) _engineStatusEl.textContent = 'iniciando WebGPU…';
++    const res = await RTR.initRuntimeRenderer(_runtimeCanvasEl);
++    _rtBooting = false;
++    if (!res.ok) {
++      if (_engineStatusEl) _engineStatusEl.textContent = 'Browser Runtime indisponível: ' + res.reason;
++      el('engineToggle').checked = false;
++      _runtimeCanvasEl.style.display = 'none';
++      return;
++    }
++  }
++  RT_MODE = runtime;
++  _runtimeCanvasEl.style.display = runtime ? 'block' : 'none';
++  _runtimeHudEl.style.display = runtime ? 'block' : 'none';
++  if (runtime) {
++    _lastMirrorAt = 0;
++    const info = RTR.runtimeInfo();
++    if (_engineStatusEl) _engineStatusEl.textContent = `Browser Runtime ativo — ${info?.software ? 'WebGPU por software (lento)' : 'GPU: ' + info?.adapter}`;
++  } else {
++    RTR.runtimeHideAll();
++    if (_engineStatusEl) _engineStatusEl.textContent = 'Babylon.js (WebGL) — padrão';
++  }
++}
++el('engineToggle')?.addEventListener('change', (e) => setEngineMode(e.target.checked));
++window.__RTR = RTR; window.__cam = camera; window.__scene3d = scene3d;
++
++// Babylon's own frame cost, sampled ONLY while the runtime is off (so it
++// isn't polluted by the runtime doing a second render on the same frame).
++const _bab = { frameMs: 0, active: 0 };
++function sampleBabylonCost() {
++  const f = engine.getFps();
++  if (f > 0) _bab.frameMs = _bab.frameMs ? _bab.frameMs * 0.92 + (1000 / f) * 0.08 : 1000 / f;
++  _bab.active = scene3d.getActiveMeshes().length;
++}
++function updateRuntimeHud(st) {
++  if (!st || !_runtimeHudEl) return;
++  const info = RTR.runtimeInfo() || {};
++  _runtimeHudEl.textContent =
++    `BROWSER RUNTIME  (C++/WASM + WebGPU)\n` +
++    `cpu frame  ${st.cpuFrameMs.toFixed(2)} ms   ·   eval(cena) ${st.evalMs.toFixed(2)} ms\n` +
++    `draws ${st.drawCalls}   ·   visíveis ${st.visible.toLocaleString('pt-BR')} / ${st.entities.toLocaleString('pt-BR')} entidades\n` +
++    `${(info.mirrorTris || 0).toLocaleString('pt-BR')} triângulos   ·   espelhar ${(info.mirrorMs || 0).toFixed(1)} ms /250ms\n` +
++    `wasm heap ${st.wasmHeapMB.toFixed(0)} MB` + (st.gpuMs != null ? `   ·   gpu ${st.gpuMs.toFixed(1)} ms${info.software ? ' (software)' : ''}` : '') + `\n` +
++    `\nBABYLON.js (WebGL) — última medição só-Babylon\n` +
++    `cpu frame  ${_bab.frameMs ? '~' + _bab.frameMs.toFixed(2) + ' ms' : '—'}   ·   ${_bab.active.toLocaleString('pt-BR')} meshes ativos`;
++}
++
+ engine.runRenderLoop(() => {
++  // Babylon always renders (drives camera input, picking, labels, the
++  // streaming window). When RT_MODE it renders underneath the opaque
++  // runtime canvas — wasted pixels, but the runtime's cpuFrame/eval/gpu
++  // are measured independently by renderOnce(), so the comparison the
++  // HUD shows stays clean.
+   scene3d.render();
++  if (RT_MODE && RTR.isRuntimeReady()) {
++    const nowP = performance.now();
++    if (nowP - _lastMirrorAt >= RT_MIRROR_INTERVAL_MS) {
++      _lastMirrorAt = nowP;
++      RTR.runtimeMirrorScene(scene3d, BABYLON);
++    }
++    updateRuntimeHud(RTR.runtimeRenderFrame(camera));
++  } else {
++    sampleBabylonCost(); // clean Babylon-only frame cost, for the HUD comparison
++  }
+   if (smartCityWindow) {
+     const now = Date.now();
+     if (now - lastSmartCityWindowCheckAt >= SMART_CITY_WINDOW_CHECK_INTERVAL_MS) {
