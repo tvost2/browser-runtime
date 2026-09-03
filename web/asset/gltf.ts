@@ -53,7 +53,23 @@ export interface DecodeStats {
   bytesUploadedToWasm: number;
 }
 
+const HBC_MAGIC = 0x31434248; // 'HBC1' little-endian
+
 export async function decodeGLB(bytes: Uint8Array, opts: DecodeOptions = {}): Promise<Asset> {
+  // .hbc (Cube3 Vault container) — lossless-compressed GLB. Decompress it back to
+  // a GLB in place, then fall through to the normal path. The decompressed bytes
+  // are handed straight to the native pipeline (never re-parsed by a JS loader).
+  // The decoder + vendored Brotli is a lazily-loaded sibling chunk (./hbc.js).
+  if (bytes.length >= 4 && new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true) === HBC_MAGIC) {
+    const { decodeHbc } = await import(/* @vite-ignore */ /* webpackIgnore: true */ "./hbc.js");
+    const t0 = performance.now();
+    const { data, header } = await decodeHbc(bytes, { verify: false });
+    const origSize = (header as { original?: { size?: number } })?.original?.size;
+    const o = opts as DecodeOptions & { _hbcMs?: number; _hbcRatio?: number };
+    o._hbcMs = performance.now() - t0;
+    o._hbcRatio = origSize ? bytes.length / origSize : 0;
+    bytes = data;
+  }
   if (opts.parser === "native") {
     const { decodeGLBNative, NativePipelineUnsupported } = await import("./native.js");
     try {

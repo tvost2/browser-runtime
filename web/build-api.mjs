@@ -37,10 +37,21 @@ const opts = {
   outfile: join(dist, "engine.js"),
   // emscripten loader stays a sibling file; node: builtins are for the Node-only
   // asset-loading branch (tests) and are never reached in the browser.
-  external: ["./engine.mjs", "node:*"],
+  // hbc.js (the .hbc decompressor + vendored Brotli, ~80 KB) is a sibling too —
+  // decodeGLB() imports it lazily only when it sees an .hbc container.
+  external: ["./engine.mjs", "./hbc.js", "node:*"],
   banner: { js: "// bcpp engine — generated bundle, do not edit\n" },
   logLevel: "info",
 };
+
+// the .hbc decoder as its own lazily-loaded chunk
+await build({
+  entryPoints: [join(webDir, "asset", "hbc", "hbc-decoder.js")],
+  bundle: true, format: "esm", target: "es2022",
+  outfile: join(dist, "hbc.js"),
+  banner: { js: "// bcpp hbc decoder — generated bundle\n" },
+  logLevel: "silent",
+});
 
 if (process.argv.includes("--watch")) {
   const ctx = await context(opts);

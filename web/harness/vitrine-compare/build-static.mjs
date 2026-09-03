@@ -34,7 +34,7 @@ await rm(out, { recursive: true, force: true });
 await mkdir(models, { recursive: true });
 
 // 1. engine bundle
-for (const f of ["engine.js", "engine.mjs", "engine.wasm"]) {
+for (const f of ["engine.js", "engine.mjs", "engine.wasm", "hbc.js"]) {
   const src = join(web, "dist", f);
   if (!existsSync(src)) { console.error(`missing ${src} — run: npm run build`); process.exit(1); }
   await cp(src, join(out, f));
