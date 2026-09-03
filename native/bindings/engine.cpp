@@ -68,6 +68,7 @@ struct WasmWorld {
     int gpuEntityBucketPtr()    { return P(w.gpuEntityBucketData()); } // u32 x count
     int recomputedPtr()         { return P(w.recomputedData()); }      // u8  x count — entities whose world matrix changed this frame
     uint32_t gpuLayoutRebuilt() { return w.gpuLayoutRebuilt(); }       // 1 = per-entity buffers need re-upload
+    int gpuFramePtr()           { return P(w.gpuFrameData()); }        // 176 bytes: viewProj + frustum planes + counts (one upload)
 
     // stats
     uint32_t sVisible()       { return w.stats.visible; }
@@ -140,6 +141,7 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("gpuEntityBucketPtr", &WasmWorld::gpuEntityBucketPtr)
         .function("recomputedPtr", &WasmWorld::recomputedPtr)
         .function("gpuLayoutRebuilt", &WasmWorld::gpuLayoutRebuilt)
+        .function("gpuFramePtr", &WasmWorld::gpuFramePtr)
         .function("worldMinPtr", &WasmWorld::worldMinPtr)
         .function("worldMaxPtr", &WasmWorld::worldMaxPtr)
         .function("sVisible", &WasmWorld::sVisible)

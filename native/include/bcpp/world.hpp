@@ -14,6 +14,7 @@
 #include "bvh.hpp"
 #include <vector>
 #include <cstdint>
+#include <cstring>
 #include <algorithm>
 #include <chrono>
 
@@ -63,6 +64,28 @@ struct EvalStats {
 };
 
 struct Batch { uint32_t meshId; uint32_t firstInstance; uint32_t instanceCount; };
+
+// parent-chain cap for the GPU transform pointer-chase (and the CPU depth sort
+// tolerates any depth; this only bounds the shader loop).
+inline constexpr uint32_t kGpuMaxDepth = 32;
+
+// One contiguous per-frame upload for the GPU-driven renderer. The CPU used to
+// push this as four small writeBuffer calls (camera, frustum head, planes,
+// xform uniform); C++ now lays the whole thing out in its own memory in the
+// exact std140 byte order the three compute/render shaders expect, so the
+// renderer does a single writeBuffer per frame and computes no frustum planes.
+//
+// std140 layout (WGSL `struct Frame`): mat4x4 at 0, array<vec4,6> at 64,
+// four u32 at 160 → 176 bytes, 16-byte aligned throughout.
+struct GpuFrameBlock {
+    float    viewProj[16];  //   0  mat4x4<f32>
+    float    planes[24];    //  64  array<vec4<f32>, 6>  (frustum: normal.xyz, d — Babylon order, normalised)
+    uint32_t count;         // 160
+    uint32_t numBuckets;    // 164
+    uint32_t maxDepth;      // 168
+    uint32_t _pad;          // 172
+};
+static_assert(sizeof(GpuFrameBlock) == 176, "GpuFrameBlock must match the WGSL std140 Frame layout");
 
 class World {
 public:
@@ -180,6 +203,21 @@ public:
             if (_gpuLayoutRebuilt) buildGpuBuckets();
             _meshLayoutDirty = false;
             _lastStrat = strat;
+
+            // lay out the single per-frame upload block (viewProj + frustum +
+            // counts) in GPU byte order — the renderer uploads it verbatim.
+            std::memcpy(_gpuFrame.viewProj, viewProj.m.data(), sizeof(_gpuFrame.viewProj));
+            const Frustum fr = Frustum::fromViewProj(viewProj);
+            for (int p = 0; p < 6; ++p) {
+                _gpuFrame.planes[p * 4 + 0] = fr.planes[p].normal.x;
+                _gpuFrame.planes[p * 4 + 1] = fr.planes[p].normal.y;
+                _gpuFrame.planes[p * 4 + 2] = fr.planes[p].normal.z;
+                _gpuFrame.planes[p * 4 + 3] = fr.planes[p].d;
+            }
+            _gpuFrame.count = count;
+            _gpuFrame.numBuckets = (uint32_t)_gpuBucketMesh.size();
+            _gpuFrame.maxDepth = kGpuMaxDepth;
+
             stats.visible = 0;
             stats.batches = (uint32_t)_gpuBucketMesh.size();
             stats.frameChanged = (changed || camMoved || structChanged) ? 1u : 0u;
@@ -560,6 +598,7 @@ private:
     std::vector<uint32_t> _gpuEntityBucket;  // per entity → bucket index
     std::vector<uint32_t> _gpuBuckets;       // scratch histogram, also the "built" flag
     uint32_t _gpuLayoutRebuilt = 0;          // 1 = buildGpuBuckets() ran this frame → renderer re-uploads per-entity buffers
+    GpuFrameBlock _gpuFrame{};               // the single per-frame upload (see struct doc)
 
     void buildGpuBuckets() {
         _gpuBucketMesh.clear();
@@ -595,6 +634,7 @@ public:
     const uint32_t* gpuEntityBucketData() const { return _gpuEntityBucket.data(); }
     const uint8_t*  recomputedData() const { return _recomputed.data(); }
     uint32_t gpuLayoutRebuilt() const { return _gpuLayoutRebuilt; }
+    const GpuFrameBlock* gpuFrameData() const { return &_gpuFrame; }  // 176 bytes, GPU byte order
 };
 
 } // namespace bcpp

@@ -27,6 +27,7 @@ interface WasmWorld {
   worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   gpuBucketCount(): number; gpuBucketMeshPtr(): number; gpuBucketOffsetPtr(): number;
   gpuEntityBucketPtr(): number; recomputedPtr(): number; gpuLayoutRebuilt(): number;
+  gpuFramePtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
   sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
@@ -179,6 +180,9 @@ export class WasmCore {
       count,
       numBuckets: nb,
       maxDepth: 32,
+      // the single per-frame upload block (viewProj + frustum planes + counts),
+      // laid out GPU-side by C++ — 176 bytes, uploaded verbatim by the renderer.
+      frame: new Uint8Array(m.HEAPU8.buffer, w.gpuFramePtr(), 176),
       bucketMesh,
       bucketOffset: new Uint32Array(m.HEAPU32.buffer, w.gpuBucketOffsetPtr(), nb + 1),
       entityBucket: new Uint32Array(m.HEAPU32.buffer, w.gpuEntityBucketPtr(), count),

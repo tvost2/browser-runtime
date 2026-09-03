@@ -59,16 +59,24 @@ struct VSOut {
 // One compute dispatch culls every entity against the frustum and atomically
 // compacts the survivors into per-mesh runs of a `visibleIds` buffer; a second
 // tiny dispatch fills a DrawIndexedIndirect args buffer. The render pass then
-// issues one drawIndexedIndirect per bucket — the CPU builds no render list and
-// uploads only the frustum planes + any world matrices that changed.
-const CULL_WGSL = /* wgsl */ `
-struct CullU {
+// issues one drawIndexedIndirect per bucket — the CPU builds no render list.
+//
+// All three shaders (xform, cull, render) bind the SAME per-frame uniform at
+// group 0 / binding 0: `Frame`, laid out and filled by C++ (`GpuFrameBlock`) so
+// the renderer uploads it with a single writeBuffer and computes no planes.
+const FRAME_WGSL = /* wgsl */ `
+struct Frame {
+  viewProj   : mat4x4<f32>,
+  planes     : array<vec4<f32>, 6>,  // frustum: normal.xyz, d  (normalised, Babylon order)
   count      : u32,
   numBuckets : u32,
-  _p0 : u32, _p1 : u32,
-  planes : array<vec4<f32>, 6>,   // frustum: normal.xyz, d  (normalised, Babylon convention)
+  maxDepth   : u32,                  // parent-chain cap for the transform pointer-chase
+  _pad       : u32,
 };
-@group(0) @binding(0) var<uniform> u : CullU;
+`;
+
+const CULL_WGSL = FRAME_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> f : Frame;
 @group(0) @binding(1) var<storage, read>        sphere       : array<vec4<f32>>;  // per entity: center.xyz, radius
 @group(0) @binding(2) var<storage, read>        entityBucket : array<u32>;        // per entity → bucket, 0xffffffff = skip
 @group(0) @binding(3) var<storage, read>        bucketOffset : array<u32>;        // numBuckets+1
@@ -83,13 +91,13 @@ const F_ON : u32 = 3u;  // F_ENABLED | F_VISIBLE
 @compute @workgroup_size(64)
 fn cull(@builtin(global_invocation_id) gid : vec3<u32>) {
   let i = gid.x;
-  if (i >= u.count) { return; }
+  if (i >= f.count) { return; }
   let b = entityBucket[i];
   if (b == 0xffffffffu) { return; }
   if ((flags[i] & F_ON) != F_ON) { return; }
   let s = sphere[i];
   for (var p = 0u; p < 6u; p = p + 1u) {
-    if (dot(u.planes[p].xyz, s.xyz) + u.planes[p].w <= -s.w) { return; }
+    if (dot(f.planes[p].xyz, s.xyz) + f.planes[p].w <= -s.w) { return; }
   }
   let slot = atomicAdd(&bucketCount[b], 1u);
   visibleIds[bucketOffset[b] + slot] = i;
@@ -98,7 +106,7 @@ fn cull(@builtin(global_invocation_id) gid : vec3<u32>) {
 @compute @workgroup_size(64)
 fn args(@builtin(global_invocation_id) gid : vec3<u32>) {
   let b = gid.x;
-  if (b >= u.numBuckets) { return; }
+  if (b >= f.numBuckets) { return; }
   let mi = meshInfo[b];
   let o = b * 5u;
   drawArgs[o + 0u] = mi.x;                         // indexCount
@@ -112,9 +120,8 @@ fn args(@builtin(global_invocation_id) gid : vec3<u32>) {
 // (compose local TRS, pointer-chase up the parent chain) + world bounding
 // sphere. The CPU uploads local TRS only when it changes; the GPU is the sole
 // owner of world matrices in this mode.
-const XFORM_WGSL = /* wgsl */ `
-struct XU { count : u32, maxDepth : u32, _a : u32, _b : u32 };
-@group(0) @binding(0) var<uniform> u : XU;
+const XFORM_WGSL = FRAME_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> f : Frame;
 @group(0) @binding(1) var<storage, read>       lpos   : array<f32>;        // 3 per entity
 @group(0) @binding(2) var<storage, read>       lrot   : array<vec4<f32>>;  // quat x,y,z,w
 @group(0) @binding(3) var<storage, read>       lscl   : array<f32>;        // 3
@@ -145,12 +152,12 @@ fn composeLocal(i : u32) -> mat4x4<f32> {
 @compute @workgroup_size(64)
 fn xform(@builtin(global_invocation_id) gid : vec3<u32>) {
   let i = gid.x;
-  if (i >= u.count) { return; }
+  if (i >= f.count) { return; }
   var m = composeLocal(i);
   var p = parent[i];
   var guard = 0u;
   loop {
-    if (p < 0 || guard >= u.maxDepth) { break; }
+    if (p < 0 || guard >= f.maxDepth) { break; }
     m = composeLocal(u32(p)) * m;   // ancestor on the left (WGSL)  ==  local·parentWorld (C++)
     p = parent[u32(p)];
     guard = guard + 1u;
@@ -175,9 +182,8 @@ fn xform(@builtin(global_invocation_id) gid : vec3<u32>) {
 
 // render pipeline for GPU mode: world matrices are entity-indexed, the instance
 // index goes through visibleIds first.
-const GPU_WGSL = /* wgsl */ `
-struct Camera { viewProj : mat4x4<f32> };
-@group(0) @binding(0) var<uniform> camera : Camera;
+const GPU_WGSL = FRAME_WGSL + /* wgsl */ `
+@group(0) @binding(0) var<uniform> f : Frame;
 @group(0) @binding(1) var<storage, read> worldMats  : array<mat4x4<f32>>;  // entity-indexed
 @group(0) @binding(2) var<storage, read> visibleIds : array<u32>;
 // per-bucket base into visibleIds, set via a dynamic uniform offset each draw.
@@ -197,7 +203,7 @@ struct VSOut { @builtin(position) clip : vec4<f32>, @location(0) n : vec3<f32>, 
               @location(2) uv : vec2<f32>, @builtin(instance_index) ii : u32) -> VSOut {
   let world = worldMats[visibleIds[bucket.base + ii]];
   var o : VSOut;
-  o.clip = camera.viewProj * (world * vec4<f32>(p, 1.0));
+  o.clip = f.viewProj * (world * vec4<f32>(p, 1.0));
   o.n = normalize((world * vec4<f32>(nrm, 0.0)).xyz);
   o.uv = uv;
   return o;
@@ -221,6 +227,9 @@ export interface GpuFrame {
   count: number;
   numBuckets: number;
   maxDepth: number;           // parent-chain cap for the transform pointer-chase
+  /** the single per-frame uniform upload (viewProj + frustum planes + counts),
+   *  laid out in GPU byte order by C++ — 176 bytes, uploaded verbatim */
+  frame: Uint8Array;
   bucketMesh: Uint32Array;    // meshId per bucket (draw order)
   bucketOffset: Uint32Array;  // numBuckets + 1
   entityBucket: Uint32Array;  // count
@@ -307,7 +316,9 @@ export class Renderer {
   private xformBind?: GPUBindGroup;
   private gLPos?: GPUBuffer; private gLRot?: GPUBuffer; private gLScl?: GPUBuffer;
   private gParent?: GPUBuffer; private gLMin?: GPUBuffer; private gLMax?: GPUBuffer;
-  private gXformU?: GPUBuffer;
+  // one uniform, shared by the xform / cull / render pipelines at g0 binding 0:
+  // viewProj + frustum planes + counts, filled GPU-side by C++, one writeBuffer.
+  private gFrameU?: GPUBuffer;
   private gStructValid = false;   // parent + local AABB uploaded for the current structure
   private gLocalValid = false;    // local TRS fully uploaded once
   private computeCull?: GPUComputePipeline;
@@ -327,13 +338,11 @@ export class Renderer {
   private gDrawArgs?: GPUBuffer;
   private gBucketBase?: GPUBuffer;   // per-bucket base into visibleIds, one 256-aligned u32 per bucket (dynamic uniform offset)
   private _bucketOffCpu = new Uint32Array(0);
-  private gCullU?: GPUBuffer;
   private gCullBind?: GPUBindGroup;
   private g0Gpu?: GPUBindGroup;
   private gEntCap = 0;
   private gBucketCap = 0;
   private gBucketMesh = new Uint32Array(0);
-  private _plane = new Float32Array(24);
 
   drawCalls = 0;
 
@@ -428,7 +437,8 @@ export class Renderer {
     const clayout = d.createPipelineLayout({ bindGroupLayouts: [this.cullLayout] });
     this.computeCull = d.createComputePipeline({ layout: clayout, compute: { module: cmod, entryPoint: "cull" } });
     this.computeArgs = d.createComputePipeline({ layout: clayout, compute: { module: cmod, entryPoint: "args" } });
-    this.gCullU = d.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    // the shared per-frame uniform (C++ GpuFrameBlock — 176 bytes)
+    this.gFrameU = d.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
     // transform pass — composes world matrices from local TRS on the GPU
     this.xformLayout = d.createBindGroupLayout({
@@ -449,9 +459,8 @@ export class Renderer {
       layout: d.createPipelineLayout({ bindGroupLayouts: [this.xformLayout] }),
       compute: { module: xmod, entryPoint: "xform" },
     });
-    this.gXformU = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 
-    // GPU-mode render pipeline: g0 = camera + worldMats + visibleIds
+    // GPU-mode render pipeline: g0 = frame + worldMats + visibleIds + bucket base
     this.g0GpuLayout = d.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
@@ -489,8 +498,8 @@ export class Renderer {
 
   dispose() {
     for (const b of [this.posBuf, this.nrmBuf, this.uvBuf, this.ibuf, this.camBuf, this.modelBuf, this.qResolve, this.qRead,
-      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gCullU,
-      this.gLPos, this.gLRot, this.gLScl, this.gParent, this.gLMin, this.gLMax, this.gXformU, this._bucketCntRead]) b?.destroy();
+      this.gWorldMat, this.gSphere, this.gEntBucket, this.gBucketOff, this.gFlags, this.gVisible, this.gBucketCnt, this.gMeshInfo, this.gDrawArgs, this.gBucketBase, this.gFrameU,
+      this.gLPos, this.gLRot, this.gLScl, this.gParent, this.gLMin, this.gLMax, this._bucketCntRead]) b?.destroy();
     for (const m of this.materials.values()) { m.buf.destroy(); m.tex?.destroy(); }
     this.depth?.destroy(); this.defaultTex?.destroy(); this.qset?.destroy();
     this.device.destroy();
@@ -813,7 +822,7 @@ export class Renderer {
       this.xformBind = d.createBindGroup({
         layout: this.xformLayout!,
         entries: [
-          { binding: 0, resource: { buffer: this.gXformU! } },
+          { binding: 0, resource: { buffer: this.gFrameU! } },
           { binding: 1, resource: { buffer: this.gLPos! } },
           { binding: 2, resource: { buffer: this.gLRot! } },
           { binding: 3, resource: { buffer: this.gLScl! } },
@@ -827,7 +836,7 @@ export class Renderer {
       this.gCullBind = d.createBindGroup({
         layout: this.cullLayout!,
         entries: [
-          { binding: 0, resource: { buffer: this.gCullU! } },
+          { binding: 0, resource: { buffer: this.gFrameU! } },
           { binding: 1, resource: { buffer: this.gSphere! } },
           { binding: 2, resource: { buffer: this.gEntBucket! } },
           { binding: 3, resource: { buffer: this.gBucketOff! } },
@@ -841,30 +850,12 @@ export class Renderer {
       this.g0Gpu = d.createBindGroup({
         layout: this.g0GpuLayout!,
         entries: [
-          { binding: 0, resource: { buffer: this.camBuf } },
+          { binding: 0, resource: { buffer: this.gFrameU! } },
           { binding: 1, resource: { buffer: this.gWorldMat! } },
           { binding: 2, resource: { buffer: this.gVisible! } },
           { binding: 3, resource: { buffer: this.gBucketBase!, size: 16 } },
         ],
       });
-    }
-  }
-
-  /** frustum planes from viewProj (row-vector, Babylon convention), normalised */
-  private writePlanes(m: Float32Array) {
-    const P = this._plane;
-    const rows = [
-      [m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]], // near
-      [m[3] - m[2], m[7] - m[6], m[11] - m[10], m[15] - m[14]], // far
-      [m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]],  // left
-      [m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]],  // right
-      [m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]],  // top
-      [m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]],  // bottom
-    ];
-    for (let i = 0; i < 6; i++) {
-      const [a, b, c, dd] = rows[i];
-      const inv = 1 / (Math.hypot(a, b, c) || 1);
-      P[i * 4] = a * inv; P[i * 4 + 1] = b * inv; P[i * 4 + 2] = c * inv; P[i * 4 + 3] = dd * inv;
     }
   }
 
@@ -916,12 +907,10 @@ export class Renderer {
     }
 
     if (recull || xformDirty) {
-      d.queue.writeBuffer(this.camBuf, 0, viewProj);
-      const head = new Uint32Array(4); head[0] = gpu.count; head[1] = gpu.numBuckets;
-      d.queue.writeBuffer(this.gCullU!, 0, head);
-      this.writePlanes(viewProj);
-      d.queue.writeBuffer(this.gCullU!, 16, this._plane);
-      d.queue.writeBuffer(this.gXformU!, 0, new Uint32Array([gpu.count, gpu.maxDepth, 0, 0]));
+      // ONE per-frame upload: viewProj + frustum planes + counts, laid out in
+      // GPU byte order by C++ (GpuFrameBlock). Was four small writeBuffer calls
+      // (camera / cull head / planes / xform uniform) computing planes in JS.
+      d.queue.writeBuffer(this.gFrameU!, 0, gpu.frame.slice());
 
       // pass 1: transform (writes gWorldMat + gSphere) — separate pass so the
       // cull pass sees the results (no auto-barrier within a compute pass).
@@ -1036,7 +1025,7 @@ export class Renderer {
   /** clear-only frame (no geometry / no buckets yet) */
   private blank(viewProj: Float32Array) {
     const d = this.device;
-    d.queue.writeBuffer(this.camBuf, 0, viewProj);
+    if (this.gFrameU) d.queue.writeBuffer(this.gFrameU, 0, viewProj);
     const enc = d.createCommandEncoder();
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: this.ctx.getCurrentTexture().createView(), clearValue: { r: 0.04, g: 0.05, b: 0.07, a: 1 }, loadOp: "clear", storeOp: "store" }],
