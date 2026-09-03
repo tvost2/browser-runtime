@@ -104,6 +104,12 @@ struct Batch {
     uint32_t totalVerts = 0, totalIndices = 0;
     uint32_t crossReads = 0;       // debug: bytes the loader would otherwise touch element-wise
 
+    // When set, process() reads geometry from this external blob (already in
+    // WASM memory — e.g. the GLB the native pipeline holds) instead of the `bin`
+    // vector. PrimDesc offsets are then absolute into `binExt`. Zero extra copy.
+    const uint8_t* binExt = nullptr;
+    size_t binExtLen = 0;
+
     void reserveBin(uint32_t n) { bin.resize(n); }
     void setPrimCount(uint32_t n) { desc.resize(n); }
 
@@ -125,7 +131,7 @@ struct Batch {
         tan.assign((flags & F_GEN_TANGENTS) ? (size_t)totalVerts * 4 : 0, 0.0f);
         out.assign(np, PrimOut{});
 
-        const uint8_t* B = bin.data();
+        const uint8_t* B = binExt ? binExt : bin.data();
         uint32_t vBase = 0, iBase = 0;
         for (uint32_t pi = 0; pi < np; ++pi) {
             const PrimDesc& d = desc[pi];
