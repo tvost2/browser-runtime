@@ -1,5 +1,5 @@
 --- .bak-browser-runtime/digitalTwinDemoMain.js	2026-09-03 16:33:17.680654606 +0000
-+++ src/digitalTwin/digitalTwinDemoMain.js	2026-09-03 17:08:46.294323987 +0000
++++ src/digitalTwin/digitalTwinDemoMain.js	2026-09-03 18:16:05.113822705 +0000
 @@ -16,6 +16,7 @@
  
  import { DigitalTwinScene } from './DigitalTwinScene.js';
@@ -8,7 +8,7 @@
  import { GeometryKind } from './GeometryPrimitives.js';
  import { extrudePolygonToMesh, polylineToRibbonMesh, triangulatePolygon } from './geometryUtils.js';
  import { applySparseGeometryToMesh } from '../primezeta/renderers/BabylonSparseFieldAdapter.js';
-@@ -2609,8 +2610,110 @@
+@@ -2609,8 +2610,111 @@
  // has loaded).
  let lastSmartCityWindowCheckAt = 0;
  const SMART_CITY_WINDOW_CHECK_INTERVAL_MS = 300;
@@ -94,6 +94,7 @@
 +    `cpu frame  ${st.cpuFrameMs.toFixed(2)} ms   ·   eval(cena) ${st.evalMs.toFixed(2)} ms\n` +
 +    `draws ${st.drawCalls}   ·   visíveis ${st.visible.toLocaleString('pt-BR')} / ${st.entities.toLocaleString('pt-BR')} entidades\n` +
 +    `${(info.mirrorTris || 0).toLocaleString('pt-BR')} triângulos   ·   espelhar ${(info.mirrorMs || 0).toFixed(1)} ms /250ms\n` +
++    `upload geom ${(info.geomUploadKB || 0).toFixed(0)} KB último  ·  ${(info.geomTotalMB || 0).toFixed(1)} MB total\n` +
 +    `wasm heap ${st.wasmHeapMB.toFixed(0)} MB` + (st.gpuMs != null ? `   ·   gpu ${st.gpuMs.toFixed(1)} ms${info.software ? ' (software)' : ''}` : '') + `\n` +
 +    `\nBABYLON.js (WebGL) — última medição só-Babylon\n` +
 +    `cpu frame  ${_bab.frameMs ? '~' + _bab.frameMs.toFixed(2) + ' ms' : '—'}   ·   ${_bab.active.toLocaleString('pt-BR')} meshes ativos`;

@@ -78,6 +78,8 @@ export function runtimeInfo() {
     mirrorMs: RT.mirrorMs,
     mirrorVerts: RT.mirrorVerts,
     mirrorTris: RT.mirrorTris,
+    geomUploadKB: (RT.engine.renderer.lastGeomUploadBytes || 0) / 1024,
+    geomTotalMB: (RT.engine.renderer.geomBytesTotal || 0) / 1048576,
   };
 }
 

@@ -70,16 +70,32 @@ SkyMaterial every frame on a 2014 CPU — not representative of a real GPU,
 but it is the same frame the runtime does in ~2 ms of CPU + one WebGPU
 submit.
 
+### Update — geometry upload made incremental
+
+`Renderer.uploadMeshes` used to rebuild the whole vertex/index buffer on
+any mesh add (O(all meshes), plus a JS interleave loop). Replaced with an
+**append-only arena + SoA vertex buffers**: a new mesh is written at the
+tail, buffers double only when the tail overflows. Streaming a new city
+region now uploads only that region's ~12–22 MB delta, and the frame that
+runs `uploadMeshes` no longer touches the ~50 MB already resident.
+
+Measured on the live twin, jumping between avenues (WARP):
+
+| | before | after |
+|---|---|---|
+| `cpu frame` after a region stream | spike (full re-upload) | **0.8–0.9 ms** (flat) |
+| geometry re-uploaded per jump | cumulative total (up to ~97 MB) | **the delta only** (12–22 MB) |
+| `bench/run-mesh-upload.mjs`, 3600 meshes | uploadMs 6 → 40 ms, climbing | **2.6 → 1.9 ms, flat** |
+
+The `espelhar` (mirror) spike of ~100 ms on a big stream is what remains —
+that's the adapter's JS mesh readback + world-matrix bake, i.e. the cost
+of copying *out of Babylon*, not the engine.
+
 ### Honest limitations
 
 - **No lighting** in the runtime path — flat unlit colour per face
   (Babylon has hemispheric + directional). Fine for a cost comparison,
   not a beauty match.
-- **Mesh re-upload is all-or-nothing.** `Renderer.uploadMeshes` rebuilds
-  the entire vertex/index buffer whenever any mesh is added, so a
-  region-boundary crossing costs a ~200 ms spike. The engine's GLB path
-  uploads once; a streaming mesh set is a workload it wasn't tuned for.
-  An incremental mesh-buffer API would remove the spike.
 - Billboards (POIs), terrain and the LiDAR point cloud are not mirrored —
   Babylon still draws those; the comparison is the building + street mesh
   workload only.
