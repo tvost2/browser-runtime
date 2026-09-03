@@ -64,9 +64,15 @@ Equivalence (60k, moving camera): GPU misses **0** entities the CPU keeps;
 over-draws 0.05–0.08 % (frustum-boundary float noise — the safe direction, never
 under-draws). Static scenes on WARP pay per-frame compute-dispatch overhead
 (situational, like `Bvh`); a real GPU wouldn't. Hierarchy still works — the CPU
-transform pass runs first, only cull moved to the GPU. Not yet verified on the
-digital-twin's ~3.7k unique-mesh buckets (renders black on WARP there; needs a
-real GPU).
+transform pass runs first, only cull moved to the GPU.
+
+**Many-bucket bug (fixed):** with one draw bucket it worked; with thousands it
+rendered black. WARP / older Dawn don't add `drawIndexedIndirect`'s
+`firstInstance` to `@builtin(instance_index)`, so every bucket's VS indexed
+`visibleIds[0..]` and drew only bucket 0. Fix: `firstInstance` stays 0, each
+bucket's base into `visibleIds` is a per-draw **dynamic uniform-buffer offset**.
+The Uberlândia digital twin (`twin.mytheria.com.br`, ~3.7k unique meshes) now
+renders on `CullStrategy.Gpu` — HUD shows `matrizes p/ GPU 0 KB/frame`.
 
 ### Not built — the design is in the code review
 

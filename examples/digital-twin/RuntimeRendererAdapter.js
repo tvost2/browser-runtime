@@ -40,12 +40,10 @@ export async function initRuntimeRenderer(canvas) {
     catch (e) { return { ok: false, reason: 'RtEngine.create: ' + (e?.message || e) }; }
     const scene = engine.createScene();
     scene.camera.up = [0, 1, 0];
-    // CullStrategy.Gpu (compute-shader cull, zero per-frame matrix upload) is
-    // validated in bench/run-gpu-cull.mjs but renders black here on WARP with
-    // this scene's ~3.7k unique-mesh buckets — needs a real GPU to verify, so
-    // the twin stays on the default (Auto) until then. Flip this to try it:
-    // scene.cullStrategy = CullStrategy.Gpu;
-    void CullStrategy;
+    // flat entities, thousands of them, camera always moving → the GPU-driven
+    // cull path: compute-shader frustum cull + compaction, zero per-frame
+    // matrix upload, CPU builds no render list.
+    scene.cullStrategy = CullStrategy.Gpu;
     RT = {
       engine, scene, canvas,
       adapter,

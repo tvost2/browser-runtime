@@ -91,15 +91,20 @@ The `espelhar` (mirror) spike of ~100 ms on a big stream is what remains —
 that's the adapter's JS mesh readback + world-matrix bake, i.e. the cost
 of copying *out of Babylon*, not the engine.
 
-### `CullStrategy.Gpu` — validated, not yet wired here
+### `CullStrategy.Gpu` — on
 
-The compute-shader cull path (F-014: zero per-frame matrix upload, ~2.5×
-CPU-frame on a moving camera in `bench/run-gpu-cull.mjs`) is a natural fit
-for this workload — flat entities, thousands of them, camera always
-moving. But with this scene's ~3,700 unique-mesh buckets it renders black
-on the bench box's software WebGPU (WARP); needs a real GPU to confirm.
-The adapter has the one-liner commented in — flip
-`scene.cullStrategy = CullStrategy.Gpu` and test on a phone.
+The adapter sets `scene.cullStrategy = CullStrategy.Gpu`: a compute shader
+does the frustum cull + per-mesh compaction + draw-args, the CPU builds no
+render list and uploads **0 bytes of matrices per frame** (F-014). HUD
+shows `matrizes p/ GPU 0 KB/frame`, `eval(cena)` ~0.15 ms for 5.7k
+entities.
+
+The many-bucket case (~3.7k unique meshes) exposed a WARP / older-Dawn bug
+— `drawIndexedIndirect`'s `firstInstance` isn't added to
+`@builtin(instance_index)`, so every bucket drew only the first bucket's
+instances (black screen). Fixed by passing each bucket's base into
+`visibleIds` as a per-draw dynamic uniform-buffer offset instead of
+`firstInstance`.
 
 ### Honest limitations
 
