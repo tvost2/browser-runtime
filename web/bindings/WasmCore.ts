@@ -19,13 +19,19 @@ interface WasmWorld {
   setCount(n: number): void;
   posPtr(): number; rotPtr(): number; scalePtr(): number; parentPtr(): number;
   localMinPtr(): number; localMaxPtr(): number;
-  meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; viewProjPtr(): number;
+  meshIdPtr(): number; materialIdPtr(): number; flagsPtr(): number; dirtyPtr(): number; viewProjPtr(): number;
+  markAllDirty(): void;
   evaluate(strategy: number, sortByMesh: boolean, hierarchyDirty: boolean): number;
   visibleIdPtr(): number; instanceWorldPtr(): number; instanceMeshIdPtr(): number;
   batchesPtr(): number; batchCount(): number;
-  worldMatricesPtr(): number; worldSpherePtr(): number;
+  worldMatricesPtr(): number; worldSpherePtr(): number; worldMinPtr(): number; worldMaxPtr(): number;
   sVisible(): number; sTraversed(): number; sCulledDisabled(): number;
   sCulledFrustum(): number; sBatches(): number; sHierRebuilds(): number;
+  sTransformsRecomputed(): number; sFrameChanged(): number; sBvhBuilds(): number; sBvhNodes(): number;
+  raycast(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxT: number): number;
+  raycastT(): number;
+  queryBox(minx: number, miny: number, minz: number, maxx: number, maxy: number, maxz: number): number;
+  queryResultPtr(): number;
 }
 
 export interface CoreComponents {
@@ -33,6 +39,8 @@ export interface CoreComponents {
   parent: Int32Array;
   localMin: Float32Array; localMax: Float32Array;
   meshId: Uint32Array; materialId: Uint32Array; flags: Uint32Array;
+  /** 1 = this entity's local transform (or localMin/Max) changed — set by Transform setters */
+  dirty: Uint8Array;
 }
 
 export class WasmCore {
@@ -93,7 +101,18 @@ export class WasmCore {
     C.meshId = u32(w.meshIdPtr(), cap * STRIDE.meshId);
     C.materialId = u32(w.materialIdPtr(), cap * STRIDE.materialId);
     C.flags = u32(w.flagsPtr(), cap * STRIDE.flags);
+    C.dirty = new Uint8Array(m.HEAPU8.buffer, w.dirtyPtr(), cap);
     this.viewProj = f32(w.viewProjPtr(), 16);
+  }
+
+  /** All-entity world-space AABB (min, max). Views over WASM memory; valid until
+   *  the next evaluate()/resize(). For the spatial index / physics sync / debug. */
+  worldBounds(): { min: Float32Array; max: Float32Array } {
+    const m = this.mod, w = this.world;
+    return {
+      min: new Float32Array(m.HEAPF32.buffer, w.worldMinPtr(), this._count * 3),
+      max: new Float32Array(m.HEAPF32.buffer, w.worldMaxPtr(), this._count * 3),
+    };
   }
 
   writeViewProj(m16: Float32Array) { this.viewProj.set(m16); }
@@ -101,8 +120,12 @@ export class WasmCore {
   /** One boundary crossing. Returns views over WASM memory — valid until next call. */
   evaluate(strategy: CullStrategy = CullStrategy.Standard, sortByMesh = true): FrameResult {
     const w = this.world, m = this.mod;
+    const bufBefore = m.HEAPU8.buffer;
     const visible = w.evaluate(strategy, sortByMesh, this._hierarchyDirty);
     this._hierarchyDirty = false;
+    // evaluate() can grow the heap (BVH build allocates) → ALLOW_MEMORY_GROWTH
+    // swaps every HEAP* and detaches the cached component / viewProj views.
+    if (m.HEAPU8.buffer !== bufBefore) this.refreshComponentViews();
 
     const bc = w.batchCount();
     const braw = new Uint32Array(m.HEAPU32.buffer, w.batchesPtr(), bc * STRIDE.batch);
@@ -120,8 +143,30 @@ export class WasmCore {
         visible: w.sVisible(), traversed: w.sTraversed(),
         culledDisabled: w.sCulledDisabled(), culledFrustum: w.sCulledFrustum(),
         batches: w.sBatches(), hierarchyRebuilds: w.sHierRebuilds(),
+        transformsRecomputed: w.sTransformsRecomputed(), frameChanged: w.sFrameChanged(),
+        bvhBuilds: w.sBvhBuilds(), bvhNodes: w.sBvhNodes(),
       },
     };
+  }
+
+  /** Mark every entity's transform dirty — forces a full recompute next
+   *  evaluate(). Use after a bulk write that bypassed the Transform setters. */
+  markAllDirty() { this.world.markAllDirty(); }
+
+  /** Nearest entity whose world-space AABB the ray hits (BVH broadphase +
+   *  precise slab test). `dir` need not be normalised. Returns the entity id and
+   *  the hit distance along `dir`, or `null`. The spatial index is (re)built
+   *  lazily — call after an evaluate() so world AABBs are current. */
+  raycast(origin: [number, number, number], dir: [number, number, number], maxDistance = 1e30): { id: number; t: number } | null {
+    const id = this.world.raycast(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], maxDistance);
+    return id < 0 ? null : { id, t: this.world.raycastT() };
+  }
+
+  /** Entity ids whose world-space AABB overlaps the box. Returns a view over
+   *  WASM memory — copy if you need to retain it past the next query/evaluate. */
+  queryBox(min: [number, number, number], max: [number, number, number]): Uint32Array {
+    const n = this.world.queryBox(min[0], min[1], min[2], max[0], max[1], max[2]);
+    return new Uint32Array(this.mod.HEAPU32.buffer, this.world.queryResultPtr(), n);
   }
 
   /** All-entity world matrices (not just visible) — for gizmos, physics sync, debug. */

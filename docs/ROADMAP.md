@@ -72,6 +72,14 @@ complex PBR, animation graph, physics, editor.
 Profile → hypothesis → implement → equivalence → benchmark → conclusion, one at a
 time. Analyzer-ranked candidates (`npm run analyze`, all ESTIMATED — not measured):
 
+- [x] **scene evaluation — incremental transforms + spatial index**
+      ([investigations/scene-incremental.md](investigations/scene-incremental.md) ·
+      [FINDINGS F-012](FINDINGS.md#f-012)). Dirty-tracked transform recompute:
+      a static 250k-entity frame went 90 ms → 1.7 ms (~50×; ~680× Babylon-frozen
+      at 50k). `bcpp::Bvh` + `raycast()` / `queryBox()`; `CullStrategy.Bvh`
+      opt-in. `test:equivalence` 6/6, `test:spatial` 3/3.
+- [ ] incremental render list (patch changed instance matrices; persistent BVH
+      visibility) — the O(n) cull + O(visible) list-build now dominate a moving frame
 - [ ] skeleton / bone matrices
 - [ ] CPU particle update
 - [ ] geometry processing (`VertexData` transforms, merge, subdivide)

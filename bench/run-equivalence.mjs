@@ -37,6 +37,8 @@ if (gpp) {
   for (const [src, exe] of [
     ["tests/test_equiv.cpp", "test_equiv.exe"],           // math + scene.hpp kernel (19457 checks)
     ["tests/test_world_equiv.cpp", "test_world_equiv.exe"], // bcpp::World core
+    ["tests/test_incremental.cpp", "test_incremental.exe"], // incremental transform eval == full recompute
+    ["tests/test_bvh.cpp", "test_bvh.exe"],                 // BVH cull == Standard + raycast/queryBox correctness
   ]) {
     try {
       execFileSync("g++", ["-std=c++20", "-O2", "-static", "-Iinclude", src, "-o", exe],

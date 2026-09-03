@@ -62,7 +62,9 @@
     "bench:compare": "node --expose-gc bench/run-wasm.mjs && node --expose-gc bench/run-compare.mjs && node bench/report.mjs",
     "profile:pipeline": "node --expose-gc bench/profile-pipeline.mjs",
     "report": "node bench/report.mjs",
-    "analyze": "node tools/migration-analyzer/analyze.mjs"
+    "analyze": "node tools/migration-analyzer/analyze.mjs",
+    "test:spatial": "node bench/run-spatial.mjs",
+    "bench:scene": "node --expose-gc bench/run-scene-incremental.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.0"

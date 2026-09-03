@@ -3,6 +3,45 @@
 All notable changes to this experiment. Versioning is `0.MINOR.PATCH` while
 experimental — every minor may break the API.
 
+## [Unreleased] — `develop`
+
+Cycles since `v0.1.0`, each on its own branch, merged to `develop`. `v0.1.0`
+stays frozen; its benchmark results are not modified.
+
+### GLB / glTF assets  (F-010, F-011)
+
+- **`bcpp::gltf::Batch`** — batch geometry core in C++/WASM: accessor decode
+  (memcpy fast paths + SIMD), index widening, non-indexed expansion,
+  area-weighted normal generation, Lengyel tangents, AABB. ~9 JS↔WASM crossings
+  per asset, flat.
+- **Hybrid dispatch** `decodeGLB(bytes, { geometry: "auto" })` — already-GPU-ready
+  geometry stays JS zero-copy; work (tangents / normal-gen / de-quant /
+  de-interleave / non-indexed) goes to the batch core.
+- **`bcpp::gltf::Pipeline`** — the *whole* GLB→Asset decode in C++
+  (`parser: "native"`): container walk + JSON parse (vendored yyjson) + glTF
+  metadata → data-oriented `Document` + geometry via `Batch`. 5 crossings/asset.
+- Renderer: base-colour materials + textures, `Camera.fit()` depth tuning.
+- `test:glb` 89/89 · `test:glb:native` 114/114 · `test:glb:render` 6/6 (both
+  pipelines, render equivalence). `bench:glb*` — the C++ front-end is ~free
+  (~0.1 ms flat); native is +18–30 % on geometry-heavy real content, −36 % on
+  texture-heavy GPU-ready assets → route by workload.
+
+### Scene evaluation  (F-012)
+
+- **Incremental transforms** — `World::evaluate()` recomputes a world matrix +
+  bounding refit only for entities whose local transform changed (`dirty[i]`) or
+  whose ancestor moved. A fully static 250k-entity frame: ~90 ms → **1.7 ms**
+  (~50×; ~680× Babylon with `freezeWorldMatrix` + `freezeActiveMeshes` at 50k).
+  No regression at 100 % moving. Bit-exact equivalence (`test_incremental`).
+- Fast path: nothing moved + camera unchanged → render list reused,
+  `stats.frameChanged = 0`, renderer skips the instance re-upload.
+- **`bcpp::Bvh`** — flat, refittable BVH over world AABBs. `WasmCore.raycast()`
+  (nearest entity-AABB hit) and `WasmCore.queryBox()` (overlap). `CullStrategy.Bvh`
+  (opt-in, situational — large calm scenes). `test:spatial` 3/3, `test_bvh` in
+  `test:equivalence` (now 6/6).
+- Fix: `World::resize()` now preserves entity data on a capacity grow (was
+  zeroing it — latent corruption for scenes built one entity at a time).
+
 ## [0.1.0] — 2026-09-02 — Experimental baseline
 
 First reproducible, publishable baseline. **One hot path implemented**

@@ -34,7 +34,10 @@ struct WasmWorld {
     int meshIdPtr()   { return P(w.meshId.data()); }     // u32 x count
     int materialIdPtr(){ return P(w.materialId.data()); }// u32 x count
     int flagsPtr()    { return P(w.flags.data()); }      // u32 x count
+    int dirtyPtr()    { return P(w.dirty.data()); }      // u8 x count — JS sets 1 when a local transform changes
     int viewProjPtr() { return P(viewProj); }            // f32 x16
+
+    void markAllDirty() { w.markAllDirty(); }
 
     // one boundary crossing per frame. `hierarchyDirty` is tracked JS-side so
     // per-entity setParent() calls during scene build cost zero crossings.
@@ -54,6 +57,8 @@ struct WasmWorld {
     uint32_t batchCount()   { return (uint32_t)w.batches.size(); }
     int worldMatricesPtr()  { return P(w.world.data()); }            // f32 x16 x count (ALL entities)
     int worldSpherePtr()    { return P(w.worldSphere.data()); }      // f32 x4 x count
+    int worldMinPtr()       { return P(w.worldMin.data()); }         // f32 x3 x count
+    int worldMaxPtr()       { return P(w.worldMax.data()); }         // f32 x3 x count
 
     // stats
     uint32_t sVisible()       { return w.stats.visible; }
@@ -62,6 +67,28 @@ struct WasmWorld {
     uint32_t sCulledFrustum() { return w.stats.culledFrustum; }
     uint32_t sBatches()       { return w.stats.batches; }
     uint32_t sHierRebuilds()  { return w.stats.hierarchyRebuilds; }
+    uint32_t sTransformsRecomputed() { return w.stats.transformsRecomputed; }
+    uint32_t sFrameChanged() { return w.stats.frameChanged; }
+    uint32_t sBvhBuilds()    { return w.stats.bvhBuilds; }
+    uint32_t sBvhNodes()     { return w.stats.bvhNodes; }
+
+    // ---- spatial queries ----
+    float _rayT = 0;
+    int raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxT) {
+        float t;
+        uint32_t hit = w.raycast({ox, oy, oz}, {dx, dy, dz}, maxT, t);
+        _rayT = t;
+        return hit == UINT32_MAX ? -1 : (int)hit;
+    }
+    float raycastT() { return _rayT; }
+
+    std::vector<uint32_t> _queryResult;
+    uint32_t queryBox(float minx, float miny, float minz, float maxx, float maxy, float maxz) {
+        _queryResult.clear();
+        w.queryBox({minx, miny, minz}, {maxx, maxy, maxz}, _queryResult);
+        return (uint32_t)_queryResult.size();
+    }
+    int queryResultPtr() { return P(_queryResult.data()); }  // u32 x (last queryBox return)
 };
 
 } // namespace
@@ -80,6 +107,8 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("meshIdPtr", &WasmWorld::meshIdPtr)
         .function("materialIdPtr", &WasmWorld::materialIdPtr)
         .function("flagsPtr", &WasmWorld::flagsPtr)
+        .function("dirtyPtr", &WasmWorld::dirtyPtr)
+        .function("markAllDirty", &WasmWorld::markAllDirty)
         .function("viewProjPtr", &WasmWorld::viewProjPtr)
         .function("evaluate", &WasmWorld::evaluate)
         .function("visibleIdPtr", &WasmWorld::visibleIdPtr)
@@ -89,11 +118,21 @@ EMSCRIPTEN_BINDINGS(bcpp_engine) {
         .function("batchCount", &WasmWorld::batchCount)
         .function("worldMatricesPtr", &WasmWorld::worldMatricesPtr)
         .function("worldSpherePtr", &WasmWorld::worldSpherePtr)
+        .function("worldMinPtr", &WasmWorld::worldMinPtr)
+        .function("worldMaxPtr", &WasmWorld::worldMaxPtr)
         .function("sVisible", &WasmWorld::sVisible)
         .function("sTraversed", &WasmWorld::sTraversed)
         .function("sCulledDisabled", &WasmWorld::sCulledDisabled)
         .function("sCulledFrustum", &WasmWorld::sCulledFrustum)
         .function("sBatches", &WasmWorld::sBatches)
-        .function("sHierRebuilds", &WasmWorld::sHierRebuilds);
+        .function("sHierRebuilds", &WasmWorld::sHierRebuilds)
+        .function("sTransformsRecomputed", &WasmWorld::sTransformsRecomputed)
+        .function("sFrameChanged", &WasmWorld::sFrameChanged)
+        .function("sBvhBuilds", &WasmWorld::sBvhBuilds)
+        .function("sBvhNodes", &WasmWorld::sBvhNodes)
+        .function("raycast", &WasmWorld::raycast)
+        .function("raycastT", &WasmWorld::raycastT)
+        .function("queryBox", &WasmWorld::queryBox)
+        .function("queryResultPtr", &WasmWorld::queryResultPtr);
 }
 #endif
